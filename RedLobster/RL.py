@@ -16,6 +16,26 @@ import requests as rq
 import matplotlib as mpl
 import multiprocessing as MP
 import googlemaps
+import time
+import os
+from geopy.distance import vincenty
+
+def GreatCircle(Point1,PointsIn):
+    lat1=Point1[0]
+    lat2=PointsIn[0]
+    long1=Point1[1]
+    long2=PointsIn[1]
+
+    deg2rad = np.pi/180.0
+    phi1 = (90.0 - lat1)*deg2rad
+    phi2 = (90.0 - lat2)*deg2rad
+    theta1 = long1*deg2rad
+    theta2 = long2*deg2rad
+    cos = (np.sin(phi1)*np.sin(phi2)*np.cos(theta1 - theta2) +
+           np.cos(phi1)*np.cos(phi2))
+    arc = np.arccos(cos)*3959.871227;
+    return arc # returns great circle distance between points in miles
+
 
 def CircleVec(Point1,RLFrame):
 
@@ -46,6 +66,95 @@ def CircleVec(Point1,RLFrame):
 
     return AdZip
 
+def CircleVecRetLatLong(Point1,RLFrame):
+    RLLatLong=np.array(RLFrame[['Longitude','Latitude']])
+    AD=list(RLFrame['Address'])
+    Zip=list(RLFrame['Postal Code'])
+    lat1=Point1[1]
+    lat2=RLLatLong[:,1]
+    long1=Point1[0]
+    long2=RLLatLong[:,0]
+
+    deg2rad = np.pi/180.0
+    phi1 = (90.0 - lat1)*deg2rad
+    phi2 = (90.0 - lat2)*deg2rad
+    theta1 = long1*deg2rad
+    theta2 = long2*deg2rad
+    cos = (np.sin(phi1)*np.sin(phi2)*np.cos(theta1 - theta2) +
+           np.cos(phi1)*np.cos(phi2))
+    arc = np.arccos(cos)*6373;
+    IND=np.nanargmin(arc)
+    return RLLatLong[IND,:]
+
+def VincentyDistanceSpark():
+    try:
+        from pyspark import SparkContext
+        import pyspark as spark
+        NumCores=1#MP.cpu_count();
+        print('Spark Loaded')
+    except:
+        print('no Spark Package installed, running 1 CPU')
+        NumCores=-1
+
+    try:
+        ZipPop=pd.read_csv('ZipPop.csv')
+        ZipLoc=pd.read_csv('USPostalCodes.csv')
+        print('Zips Loaded')
+    except:
+        print('No Zip Data')
+        return -1
+    try:
+        LatLong=pd.read_csv('RedLobsterLoc.csv')
+        print('Lobsters Loaded')
+    except:
+        LatLong=LobsterScrapeUSA();
+    LatLong=pd.DataFrame(LatLong,columns=('Latitude','Longitude','Postal Code','StateID','Address'))
+
+    ZipPop.rename(columns={'Zip Code ZCTA':'Postal Code'},inplace=True)
+    ZipCodes=pd.merge(ZipPop,ZipLoc,on='Postal Code')
+    ZipTest=np.array(ZipCodes['Postal Code'],dtype=int)
+    LatLongRL=np.zeros([len(ZipCodes),2])
+    LatLongRL[:,0]=np.array(ZipCodes['Longitude'])
+    LatLongRL[:,1]=np.array(ZipCodes['Latitude'])
+    #N=np.array(np.round(np.random.rand(2500)*len(ZipTest)),dtype=int)
+    #LatLongRL=LatLongRL[N,:]
+    #ZipTest=ZipTest[N]
+    LatLongDist=np.zeros([len(LatLongRL),3])
+    LatLongDist[:,0]=LatLongRL[:,0]
+    LatLongDist[:,1]=LatLongRL[:,1]
+
+    t=time.time()
+    sc = SparkContext()
+    count1 = sc.parallelize(range(len(ZipTest)),NumCores)
+    count2=count1.map(lambda x: VinceSparkFunction(LatLongRL[x,:],LatLong))
+    C=count2.collect()
+    sc.stop()
+
+    Cout=np.zeros([len(C),4])
+    Cout[:,0]=C
+    Cout[:,1]=LatLongRL[:,0]
+    Cout[:,2]=LatLongRL[:,1]
+    print(time.time()-t)
+
+    return Cout
+
+
+    #for i in range(len(LatLongRL)):
+        #NearestRL=CircleVecRetLatLong(LatLongRL[i,:],LatLong)
+        #LatLongDist[:,2]=VinceSparkFunction(LatLongRL[i,:],LatLong)
+        #print(str(i) + str((LatLongDist[i,:])))
+
+
+def VinceSparkFunction(LatLongRL,LatLongAll):
+    NearestRL=CircleVecRetLatLong(LatLongRL,LatLongAll)
+    VinceDist=vincenty(NearestRL,LatLongRL).miles
+    if VinceDist>12000:
+        VinceDist=GreatCircle(NearestRL,LatLongRL)
+        print('Circle Used')
+    AD=CircleVec(LatLongRL,LatLongAll)
+    print(int(VinceDist),AD,NearestRL,LatLongRL)
+    return VinceDist
+
 def ZipCodeSpark():
 
     try:
@@ -54,8 +163,8 @@ def ZipCodeSpark():
         NumCores=MP.cpu_count();
         print('Spark Loaded')
     except:
-        print('no Spark Package installed')
-        return -1
+        print('no Spark Package installed, running 1 CPU')
+        NumCores=-1
     try:
         LatLong=pd.read_csv('RedLobsterLoc.csv')
         print('Lobsters Loaded')
@@ -72,14 +181,12 @@ def ZipCodeSpark():
 
     ZipPop.rename(columns={'Zip Code ZCTA':'Postal Code'},inplace=True)
     ZipCodes=pd.merge(ZipPop,ZipLoc,on='Postal Code')
-    #ZipCodesRL=pd.merge(ZipCodes,LatLong,on='Postal Code')
-    m=Basemap(projection='merc',llcrnrlat=24,urcrnrlat=51,llcrnrlon=-125,urcrnrlon=-65,lat_ts=20,resolution='c')
 
-    N=np.array(np.random.rand(100)*len(ZipPop),dtype=int)
-    ZipTest=np.array(ZipCodes.ix[N]['Postal Code'],dtype=int)
-    LatLongRL=np.zeros([len(ZipTest),2])
-    LatLongRL[:,0]=np.array(ZipCodes.ix[N]['Longitude'])
-    LatLongRL[:,1]=np.array(ZipCodes.ix[N]['Latitude'])
+    N=np.array(np.random.rand(2500)*len(ZipPop),dtype=int) #2500 free google directions queries
+    ZipTest=np.array(ZipCodes['Postal Code'],dtype=int)
+    LatLongRL=np.zeros([len(ZipCodes),2])
+    LatLongRL[:,0]=np.array(ZipCodes['Longitude'])
+    LatLongRL[:,1]=np.array(ZipCodes['Latitude'])
     try:
         GMapsKeyLoc=os.path.expanduser('~')+'/Documents/'
         GMapsKey=open(GMapsKeyLoc+'GMapsKey.txt').read()
@@ -87,30 +194,89 @@ def ZipCodeSpark():
         return 'Need Google Maps API Key in Documents Folder'
     T=np.zeros(len(ZipTest))
 
-    for i in range(len(ZipTest)):
-        ZipTown=ZipTest[i]
-        if ZipTown<10000:
-            ZipTown='0'+str(ZipTown)
-        else:
-            ZipTown=str(ZipTown)
-        NearestRL=CircleVec(LatLongRL[i,:],LatLong)
-        try:
+    if 1==0:
+        for i in range(len(ZipTest)):
+            ZipTown=ZipTest[i]
+            if ZipTown<10000:
+                ZipTown='0'+str(ZipTown)
+            else:
+                ZipTown=str(ZipTown)
+            NearestRL=CircleVec(LatLongRL[i,:],LatLong)
             T[i]=TravTimeGoogle(NearestRL,ZipTown,GMapsKey)
-        except:
-            T[i]=np.nan
-        print('Travel Time ' + str(T[i]/60) +' Minutes '+ NearestRL +' to ' + ZipTown )
-        print(NearestRL)
+            print('Travel Time ' + str(np.round(T[i]/60)) +' Minutes '+ NearestRL +' to ' + ZipTown )
 
+    #ZC=np.array(ZipCodes['Postal Code'],dtype=int)
+
+    N=np.array(np.round(np.random.rand(2500)*len(ZipTest)),dtype=int)
+    print(len(LatLongRL))
+    LatLongRL=LatLongRL[N,:]
+    ZipTest=ZipTest[N]
+    if NumCores>0:
+        t=time.time()
+        sc = SparkContext()
+        count1 = sc.parallelize(range(len(ZipTest)),NumCores)
+
+        try:
+            count2=count1.map(lambda x: TravTimeGoogleCall(LatLongRL[x,:],ZipTest[x],LatLong,GMapsKey))
+        except:
+            print('Map Didnt Work')
+            count2=-1
+        C3=count2.collect()
+        sc.stop()
+        print(str(time.time()-t) + ' seconds to fire up Spark')
+        Cout=np.zeros([len(C3),2])
+        Cout[:,1]=C3
+        Cout[:,0]=ZipTest
+    else:
+        Cout=np.zeros([len(ZipTest),2])
+        for x in range(len(ZipTest)):
+            Cout[x,1]=TravTimeGoogleCall(LatLongRL[x,:],ZipTest[x],LatLong,GMapsKey)
+        Cout[:,0]=ZipTest
+
+
+    #t=time.time()
+    #T1=np.zeros([len(C3),2])
+    #for x in range(len(ZipTest)):
+    #    T1[x]=TravTimeGoogleCall(LatLongRL[x,:],ZipTest[x],LatLong,GMapsKey)
+
+
+    #(str(time.time()-t) + ' seconds to run loop 1 CPU')
+
+    return Cout
+
+def TravTimeGoogleCall(LatLongZip,PopZip,LatLongAll,GMapsKey):
+
+    A1=CircleVec(LatLongZip,LatLongAll)
+    A2=PopZip
+
+    if A2<10000:
+        A2='0'+str(A2)
+
+    T=TravTimeGoogle(A1,A2,GMapsKey)
     return T
+
 
 def TravTimeGoogle(A1,A2,GMapsKey):
 
     gmaps = googlemaps.Client(key=GMapsKey)
+    A1=str(A1)
+    A2=str(A2)
+    try:
+        G = gmaps.directions(A1,A2,mode='driving')
+        #print('Directions Found')
+        #print('Address 2 ' + A2)
+        #print('Address 1 ' + A1)
 
-    G = gmaps.directions(A1,A2,mode='driving')
+    except:
+        G=np.nan
+        print('No Directions Found')
 
-    G=G[0]['legs'][0]['duration']['value']
-    #print('Travel Time ' + str(G/60) + ' minutes')
+    try:
+        G=G[0]['legs'][0]['duration']['value']
+        #print('Duration Found')
+    except:
+        G=np.nan
+        print('Could not Extract')
     return G
 
 def GetTravelTime(Add1,Zip1,Add2,Zip2):
@@ -380,4 +546,5 @@ def LobsterStates(PlotDenseMap):
 
     return States
 
-T=ZipCodeSpark()
+D2=VincentyDistanceSpark()
+#T=ZipCodeSpark()
