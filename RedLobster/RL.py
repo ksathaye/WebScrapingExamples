@@ -6,7 +6,6 @@ Created on Fri Oct 30 13:16:52 2015
 """
 
 import numpy as np
-import urllib2
 import matplotlib.pyplot as plt
 import csv
 import re
@@ -16,7 +15,36 @@ from matplotlib.patches import Polygon
 import requests as rq
 import matplotlib as mpl
 import multiprocessing as MP
+import googlemaps
 
+def CircleVec(Point1,RLFrame):
+
+    RLLatLong=np.array(RLFrame[['Longitude','Latitude']])
+    AD=list(RLFrame['Address'])
+    Zip=list(RLFrame['Postal Code'])
+    lat1=Point1[1]
+    lat2=RLLatLong[:,1]
+    long1=Point1[0]
+    long2=RLLatLong[:,0]
+
+    deg2rad = np.pi/180.0
+    phi1 = (90.0 - lat1)*deg2rad
+    phi2 = (90.0 - lat2)*deg2rad
+    theta1 = long1*deg2rad
+    theta2 = long2*deg2rad
+    cos = (np.sin(phi1)*np.sin(phi2)*np.cos(theta1 - theta2) +
+           np.cos(phi1)*np.cos(phi2))
+    arc = np.arccos(cos)*6373;
+    IND=np.nanargmin(arc)
+    ZIPIND=Zip[IND]
+    if ZIPIND<10000:
+        ZIPIND='0'+str(int(ZIPIND))
+    else:
+        ZIPIND=str(int(ZIPIND))
+
+    AdZip=AD[IND]+ ' ' + ZIPIND
+
+    return AdZip
 
 def ZipCodeSpark():
 
@@ -29,12 +57,11 @@ def ZipCodeSpark():
         print('no Spark Package installed')
         return -1
     try:
-        #LatLong=np.loadtxt('RedLobsterLoc.csv')
         LatLong=pd.read_csv('RedLobsterLoc.csv')
         print('Lobsters Loaded')
     except:
         LatLong=LobsterScrapeUSA();
-    LatLong=pd.DataFrame(LatLong,columns=('Latitude','Longitude','Postal Code','StateID'))
+    LatLong=pd.DataFrame(LatLong,columns=('Latitude','Longitude','Postal Code','StateID','Address'))
     try:
         ZipPop=pd.read_csv('ZipPop.csv')
         ZipLoc=pd.read_csv('USPostalCodes.csv')
@@ -45,19 +72,104 @@ def ZipCodeSpark():
 
     ZipPop.rename(columns={'Zip Code ZCTA':'Postal Code'},inplace=True)
     ZipCodes=pd.merge(ZipPop,ZipLoc,on='Postal Code')
-    ZipCodesRL=pd.merge(ZipCodes,LatLong,on='Postal Code')
+    #ZipCodesRL=pd.merge(ZipCodes,LatLong,on='Postal Code')
     m=Basemap(projection='merc',llcrnrlat=24,urcrnrlat=51,llcrnrlon=-125,urcrnrlon=-65,lat_ts=20,resolution='c')
 
-    return ZipCodes
+    N=np.array(np.random.rand(100)*len(ZipPop),dtype=int)
+    ZipTest=np.array(ZipCodes.ix[N]['Postal Code'],dtype=int)
+    LatLongRL=np.zeros([len(ZipTest),2])
+    LatLongRL[:,0]=np.array(ZipCodes.ix[N]['Longitude'])
+    LatLongRL[:,1]=np.array(ZipCodes.ix[N]['Latitude'])
+    try:
+        GMapsKeyLoc=os.path.expanduser('~')+'/Documents/'
+        GMapsKey=open(GMapsKeyLoc+'GMapsKey.txt').read()
+    except:
+        return 'Need Google Maps API Key in Documents Folder'
+    T=np.zeros(len(ZipTest))
 
-#def GetTravelTime(Add1,Add2):
+    for i in range(len(ZipTest)):
+        ZipTown=ZipTest[i]
+        if ZipTown<10000:
+            ZipTown='0'+str(ZipTown)
+        else:
+            ZipTown=str(ZipTown)
+        NearestRL=CircleVec(LatLongRL[i,:],LatLong)
+        try:
+            T[i]=TravTimeGoogle(NearestRL,ZipTown,GMapsKey)
+        except:
+            T[i]=np.nan
+        print('Travel Time ' + str(T[i]/60) +' Minutes '+ NearestRL +' to ' + ZipTown )
+        print(NearestRL)
+
+    return T
+
+def TravTimeGoogle(A1,A2,GMapsKey):
+
+    gmaps = googlemaps.Client(key=GMapsKey)
+
+    G = gmaps.directions(A1,A2,mode='driving')
+
+    G=G[0]['legs'][0]['duration']['value']
+    #print('Travel Time ' + str(G/60) + ' minutes')
+    return G
+
+def GetTravelTime(Add1,Zip1,Add2,Zip2):
+
+    Add1=str(Add1).replace(' ','+')
+    Add2=str(Add2).replace(' ','+')
+
+    Zip1=int(Zip1)
+    Zip2=int(Zip2)
+    if Zip1<10000:
+        Zip1='0'+str(Zip1)
+    else:
+        Zip1=str(Zip1)
+
+    if Zip2<10000:
+        Zip2='0'+str(Zip2)
+    else:
+        Zip2=str(Zip2)
+
+    TravelLink='https://www.google.com/maps/dir/'+Zip1+'+'+Add1+'/'+Zip2+ '+'+Add2
+    TravelSite=str(rq.get(TravelLink).text)
+    minFirst=TravelSite.find('miles"')-1
+    timestart=TravelSite[minFirst:].find(',"')+2
+    timeend=TravelSite[timestart+minFirst:].find('"')
+    tf=open('MapSite.txt','w')
+    tf.write(TravelSite)
+    tf.close()
+    timeString=TravelSite[timestart+minFirst:minFirst+timestart+timeend]
+    TravelTime=-1
+    if timeString.find('h')==-1:
+        SpaceFind=timeString.find(' ')
+        try:
+            TravelTime=int(timeString[0:SpaceFind])
+        except:
+            TravelTime=-1
+    else:
+        SpaceFind=timeString.find(' ')
+        Hours=int(timeString[0:SpaceFind])
+        if timeString.find('min')==-1:
+            try:
+                TravelTime=int(Hours*60)
+            except:
+                TravelTime=-1
+                print('No Hours Find')
+        else:
+            minFind=timeString.find('min')-1
+            minFindStart=timeString[0:minFind].rfind(' ')+1
+            minutes=int(timeString[minFindStart:minFind])
+            TravelTime=int(Hours*60)+minutes
+            #print(str(TravelTime)+' Minutes')
+    return TravelTime
+
 
 def PlotRL(LatLong,res):
     m = Basemap(projection='merc',llcrnrlat=24,urcrnrlat=51,llcrnrlon=-125,urcrnrlon=-65,lat_ts=20,resolution=res)
     m.drawcoastlines();
     m.drawcountries(linewidth=2,zorder=3);
     m.drawstates(zorder=3);
-    LocationsCoord=m(LatLong['Longitude'],LatLong['Latitude']);
+    LocationsCoord=m(np.array(LatLong['Longitude']),np.array(LatLong['Latitude']));
     m.drawmapboundary(fill_color='aqua',zorder=1)
     m.fillcontinents(color='w',lake_color='aqua')
     m.scatter(LocationsCoord[0],LocationsCoord[1],s=25,edgecolor='k',c='red',zorder=3);
@@ -103,7 +215,7 @@ def PlotRLDense(States):
             C=plt.fill(xx,yy,color=np.array(color))
     f=plt.scatter(FakeX,FakeY,c=FakeC,cmap=cmap)
     plt.colorbar(orientation='horizontal')
-    plt.savefig('RLDensity.pdf')
+    plt.savefig('RLDensity.png')
 
 def GetState(state,stateID):
 
@@ -168,7 +280,6 @@ def ifNext(F):
         print(nextLink)
         return nextSite
 
-
 def GetDataFromStrings(stringlist):
 
     LatLong=np.zeros([len(stringlist),4])
@@ -215,12 +326,13 @@ def LobsterScrapeUSA():
     for i in range(len(S)):
         LatLong=LatLong.append(GetState(S[i],i))
     #PlotRL(LatLong,'c')
+
     return LatLong
 
 def LoadLobster():
 
     try:
-        LatLong=np.loadtxt('RedLobsterLoc.csv')
+        LatLong=pd.read_csv('RedLobsterLoc.csv')
         return LatLong
     except:
         print('No Lobster')
@@ -229,13 +341,14 @@ def LoadLobster():
 def MapLoadLobster():
 
     try:
-        LatLong=np.loadtxt('RedLobsterLoc.csv')
-        PlotRL(LatLong,'c')
+        LatLong=pd.read_csv('RedLobsterLoc.csv')
         print('Loaded Lobster')
-        return 1
+
     except:
         print('No Lobster')
         return False
+    PlotRL(LatLong,'c')
+    return 1
 
 def LobsterStates(PlotDenseMap):
 
@@ -267,5 +380,4 @@ def LobsterStates(PlotDenseMap):
 
     return States
 
-#States=LobsterStates(True)
-#ZC=ZipCodeSpark()
+T=ZipCodeSpark()
