@@ -90,7 +90,8 @@ def VincentyDistanceSpark():
     try:
         from pyspark import SparkContext
         import pyspark as spark
-        NumCores=1#MP.cpu_count();
+        NumCores=MP.cpu_count();
+        print(NumCores)
         print('Spark Loaded')
     except:
         print('no Spark Package installed, running 1 CPU')
@@ -130,12 +131,14 @@ def VincentyDistanceSpark():
     C=count2.collect()
     sc.stop()
 
-    Cout=np.zeros([len(C),4])
+    Cout=np.zeros([len(C),3])
     Cout[:,0]=C
     Cout[:,1]=LatLongRL[:,0]
     Cout[:,2]=LatLongRL[:,1]
     print(time.time()-t)
 
+    Cout=pd.DataFrame(Cout,columns=('Distance','Longitude','Latitude'))
+    PlotRLDistance(Cout,'c')
     return Cout
 
 
@@ -143,6 +146,34 @@ def VincentyDistanceSpark():
         #NearestRL=CircleVecRetLatLong(LatLongRL[i,:],LatLong)
         #LatLongDist[:,2]=VinceSparkFunction(LatLongRL[i,:],LatLong)
         #print(str(i) + str((LatLongDist[i,:])))
+
+def PlotRLDistance(LatLong,res):
+    LatLong=LatLong[LatLong['Longitude']>-125]
+    LatLong.loc[LatLong.Distance>150,'Distance']=150
+    m = Basemap(projection='merc',llcrnrlat=24,urcrnrlat=51,llcrnrlon=-125,urcrnrlon=-65,lat_ts=20,resolution=res)
+    m.drawcoastlines();
+    m.drawcountries(linewidth=2,zorder=3);
+    m.drawstates(zorder=3);
+    LocationsCoord=m(np.array(LatLong['Longitude']),np.array(LatLong['Latitude']));
+    m.drawmapboundary(fill_color='aqua',zorder=1)
+    m.fillcontinents(color='w',lake_color='aqua')
+    cmap = plt.cm.jet
+
+    m.scatter(LocationsCoord[0],LocationsCoord[1],s=2,edgecolor='none',c=LatLong['Distance'],zorder=3,cmap=cmap);
+    plt.title('Absolute Distance to Red Lobster (miles)')
+    meridians = np.arange(10.,351.,10.)
+    parallels = np.arange(0.,81,5.)
+    m.drawparallels(parallels,labels=[False,True,True,False])
+    m.drawmeridians(meridians,labels=[True,False,False,True])
+    #shp_info = m.readshapefile('st99_d00','states',drawbounds=True)
+
+    FakeX=np.linspace(20,50,100)
+    FakeY=np.linspace(-20,-50,100)
+    FakeC=np.linspace(np.nanmin(np.array(LatLong['Distance'])),np.nanmax(np.array(LatLong['Distance'])),100)
+    f=plt.scatter(FakeX,FakeY,c=FakeC,cmap=cmap)
+    plt.colorbar(orientation='horizontal')
+
+    plt.savefig('RLPlot.png',dpi=1000)
 
 
 def VinceSparkFunction(LatLongRL,LatLongAll):
@@ -328,6 +359,7 @@ def GetTravelTime(Add1,Zip1,Add2,Zip2):
             TravelTime=int(Hours*60)+minutes
             #print(str(TravelTime)+' Minutes')
     return TravelTime
+
 
 
 def PlotRL(LatLong,res):
