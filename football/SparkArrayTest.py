@@ -121,14 +121,14 @@ def PlotSucces(DF):
     print(NP)
     plt.xlim([0,25])
     plt.xlabel('Yard To Go')
-    plt.ylabel('Probablity of 1st Down or TD')
+    plt.ylabel('Probablity of 1st Down or TD (%)')
     plt.title('NFL Drive Continuation 2009-2015')
     blue_line = mlines.Line2D([], [], color='blue', marker='o',
                           markersize=5, label='1st Down')
     green_line = mlines.Line2D([], [], color='g', marker='o',
                           markersize=5, label='2nd Down')
     red_line = mlines.Line2D([], [], color='r', marker='o',
-                          markersize=5, label='2nd Down')
+                          markersize=5, label='3rd Down')
     c_line = mlines.Line2D([], [], color='cyan', marker='o',
                           markersize=5, label='4th Down')
     plt.legend(handles=[blue_line,green_line,red_line,c_line])
