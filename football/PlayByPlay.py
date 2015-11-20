@@ -195,9 +195,9 @@ def PlotSucces(DF):
             print(First10Prob)
             First10Prob=100*NP[int(First10Prob),1]
 
-    print(NP)
+    #print(NP)
     plt.xlim([0,25])
-    plt.xlabel('Yard To Go (Minimum 100 Plays)')
+    plt.xlabel('Yards To Go (Minimum 100 Plays)')
     plt.ylabel('Probablity of 1st Down or TD (%)')
     plt.title('NFL Drive Continuation 2009-2015')
     blue_line = mlines.Line2D([], [], color='blue', marker='o',
