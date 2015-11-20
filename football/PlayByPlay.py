@@ -113,47 +113,40 @@ def DrivesFromGame(gameObj):
         D=D.append(DriveAssign(Drives))
     return D
 
-def LoadNFL(sc):
-    sqlc = SQLContext(sc)
+def SparkPandasTest(sc):
     NumCores=MP.cpu_count();
-
     years=range(2010,2016)
-    #DFYears=list()
     DF09=pd.read_csv('NFL09Drives.csv')
-    #DF10=pd.read_csv('NFL09Drives.csv')
-
-    DFAll=sqlc.createDataFrame(DF09)
-
     for i in range(len(years)):
         yr=(str(years[i]))
         print(yr)
         FName='NFLPlays' + yr +'.csv'
         PDLoad=pd.read_csv(FName)
-        A=sqlc.createDataFrame(PDLoad)
-        DFAll=DFAll.unionAll(A)
+        DF09=DF09.append(PDLoad)
 
-    #DFAll=sc.parallelize(DFAll)
-    DistDowns=DFAll.select('DownGo').distinct().toPandas()
-    DistDowns=list(DistDowns.DownGo)
+    DistDowns=list(DF09.DownGo.unique())
+    RateNum=np.zeros([len(DistDowns),2])
+    t=time.time()
+    for i in range(len(DistDowns)):
+        RateNum[i,:]=MapFilt(DF09,DistDowns[i])
+    print('For Loop Time Elapsed: ' + str(time.time()-t) + ' sec')
 
-    RandFrame=np.zeros([len(DistDowns),4])
-    OutFrame=pd.DataFrame(data=RandFrame,columns=('Down','Distance','Rate','Number'))
+    t=time.time()
+    count1 = sc.parallelize(range(len(DistDowns)),NumCores)
+    count2=count1.map(lambda x: MapFilt(DF09,DistDowns[x]))
+    R=np.array(count2.collect())
 
-    #count1 = sc.parallelize(range(len(DistDowns)),NumCores)
-    #count2=count1.map(lambda x: MapFilt(DFAll,DistDowns[x]))
- #   OutFrame=count2.collect()
-#    sc.stop()
+    print('Spark Time Elapsed: ' + str(time.time()-t) + ' sec')
 
-    for i in  range(1,10): #range(len(DistDowns)):
-        OutFrame.loc[i].Down=int(DistDowns[i][0])
-        OutFrame.loc[i].Distance=int(DistDowns[i][2:])
-        RateNum=MapFilt(DFAll,DistDowns[i])
-        OutFrame.loc[i].Rate=RateNum
-        print(RateNum)
+    DG=DF09[['Down','ToGo']]
+    DG=DG.drop_duplicates()
+    P=pd.DataFrame(R,columns=('Prob','Number'))
+    ind=DG.index
+    P.index=DG.index
+    DG['Prob']=P.Prob
+    DG['Number']=P.Number
 
-        #OutFrame.loc[i].Number=RateNum[1]
-
-    return OutFrame
+    return DG
 
 def MapFilt(DFAll,DistDowns):
     DownFilt=DFAll.filter(DFAll['DownGo']==DistDowns)
@@ -166,7 +159,7 @@ def MapFilt(DFAll,DistDowns):
 
 
 def SaveSeasonPlays():
-    weekRange=range(1,17)
+    weekRange=range(1,18)
     for y in range(2009,2016):
         D=DriveAssign(1)
         games = nfl.games(year=y,week=weekRange)
@@ -176,6 +169,50 @@ def SaveSeasonPlays():
         D.to_csv(NameString)
         print('Year: '+str(y))
 
+def MapFilt(DFAll,DistDowns):
+    DownFilt=DFAll[DFAll.DownGo==DistDowns]
+    LenAll=len(DownFilt)
+    LenSuccess=len(DownFilt[DownFilt['Success']==1])
+    RateNum=np.zeros(2)
+    RateNum[0]=LenSuccess/float(LenAll)
+    RateNum[1]=LenAll
+    return RateNum
+
+def PlotSucces(DF):
+    DF=DF[DF.Number>100]
+    DownList=list()
+    First10Prob=0
+    for i in range(1,5):
+        YDS=DF.ToGo[DF.Down==i]
+        Prob=DF.Prob[DF.Down==i]
+        NP=np.zeros([len(Prob),2])
+        NP[:,0]=np.array(YDS)
+        NP[:,1]=np.array(Prob)
+        NP=NP[NP[:,0].argsort()]
+        plt.plot(NP[:,0],NP[:,1]*100,marker='o')
+        if i==1:
+            First10Prob=np.argwhere(NP[:,0]==10)
+            print(First10Prob)
+            First10Prob=100*NP[int(First10Prob),1]
+
+    print(NP)
+    plt.xlim([0,25])
+    plt.xlabel('Yard To Go (Minimum 100 Plays)')
+    plt.ylabel('Probablity of 1st Down or TD (%)')
+    plt.title('NFL Drive Continuation 2009-2015')
+    blue_line = mlines.Line2D([], [], color='blue', marker='o',
+                          markersize=5, label='1st Down')
+    green_line = mlines.Line2D([], [], color='g', marker='o',
+                          markersize=5, label='2nd Down')
+    red_line = mlines.Line2D([], [], color='r', marker='o',
+                          markersize=5, label='3rd Down')
+    c_line = mlines.Line2D([], [], color='cyan', marker='o',
+                          markersize=5, label='4th Down')
+    plt.legend(handles=[blue_line,green_line,red_line,c_line])
+    plt.plot([0,25],[First10Prob,First10Prob],c='k')
+    plt.savefig('FirstProbs.pdf')
+    return NP
+
 if __name__ == "__main__":
     try:
         sc = SparkContext()
@@ -183,4 +220,5 @@ if __name__ == "__main__":
     except:
         print('Spark Context already exists')
 
-    OF=LoadNFL(sc)
+    A=SparkPandasTest(sc)
+    NP=PlotSucces(A)
