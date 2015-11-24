@@ -282,7 +282,7 @@ def DriveStartResultPlot(Frame):
     plt.plot(ResFrame.YardsToGo-5,ResFrame['Field Goal'],marker='s',color='g',label='Field Goal')
     plt.legend(ncol=3)
     plt.ylim([0,1])
-    plt.title('Probablity of Drive Result')
+    plt.title('Probability of Drive Result')
 
     plt.subplot(2,1,2)
     #plt.plot(ResFrame.YardsToGo-5,ResFrame.Interception,marker='o',label='Interception')
