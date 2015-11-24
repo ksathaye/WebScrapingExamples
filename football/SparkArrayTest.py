@@ -15,7 +15,6 @@ from pyspark.sql import SQLContext
 import nflgame as nfl
 import time
 import matplotlib.lines as mlines
-
 import pyspark.sql.functions as SpFun
 
 def RandAR(s):
@@ -102,20 +101,80 @@ def DriveAssign(Drive,sc):
 
     return dfSP
 
-def DriveResult(GameObj):
+def DriveResult(gameInfo):
+    games = nfl.games(year=int(gameInfo[0]),week=int(gameInfo[1]))
+    numGames=len(games)
+    if gameInfo[2]>=numGames:
+        return (np.nan,np.nan)
+    GameObj=games[int(gameInfo[2])]
     NumDrives=len(GameObj.data['drives'])-1
     OutList=[0]*(NumDrives-1)
-    FieldPosStart=np.zeros(NumDrives-1)
+    #FieldPosStart=np.zeros(NumDrives-1)
     for i in range(1,NumDrives):
         D=GameObj.drives.number(i)
-        FieldPosStart=50-D.field_start.offset
-        Result=D.result
+        try:
+            FieldPosStart=50-D.field_start.offset
+            Result=D.result
+        except:
+            FieldPosStart=np.nan
+            Result=np.nan
         OutList[i-1]=(FieldPosStart,Result)
-        print(OutList[i-1])
-    return OutList
+        print(str(OutList[i-1]) + 'Drive Number' + str(i))
+    #return OutList
+    return pd.DataFrame(OutList,columns=('Field Position', 'Result'))
+
+def DriveStartResult(Frame):
+
+    YardGo=np.arange(0,11)*10
+    EndPoss=list(pd.unique(Frame.Result))
+    EndPoss.extend(['YardsToGo'])
+    #d=np.zeros(np.size(EndPoss))*np.nan
+    try:
+        EndPoss.remove(np.nan)
+    except:
+        print('no nan')
+    try:
+        EndPoss.remove('UNKNOWN')
+    except:
+        print('No Unknown')
 
 
-if  __name__ == "__main__":
+    ResFrame=pd.DataFrame(columns=EndPoss)
+    ResFrame.YardsToGo=YardGo[1:]
+
+    U=EndPoss[0:-1]
+
+    #print(ResFrame.columns)
+    for i in range(len(YardGo)-1):
+        F=Frame[(Frame['Field Position']>YardGo[i]) & (Frame['Field Position']<YardGo[i+1])]
+        #print(str(YardGo[i])  + 'Length' + str(len(F)))
+        for k in range(len(ResFrame.columns)-1):
+            ColN=U[k]
+            N=len(F[F.Result==ColN])/float(len(F))
+            try:
+                ResFrame.loc[i,ColN]=N
+            except:
+                print('Row: ' + str(i))
+                print('Col: ' + str(ColN) +str(k))
+
+    plt.subplot(2,1,1)
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Touchdown,marker='o',label='Touchdown')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Punt,marker='x',color='r',label='Punt')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame['Field Goal'],marker='s',color='g',label='Field Goal')
+    plt.legend(ncol=3)
+    plt.ylim([0,1])
+
+    plt.subplot(2,1,2)
+    #plt.plot(ResFrame.YardsToGo-5,ResFrame.Interception,marker='o',label='Interception')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Interception+ResFrame.Fumble,marker='o',label='Fumble/INT')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Downs,marker='x',label='Downs',color='red')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame['Missed FG']+ResFrame['Blocked FG'],marker='s',label='Missed FG',color='g')
+    plt.ylim([0,.23])
+    plt.legend(ncol=3)
+
+    return ResFrame
+
+def MakeDriveResultFrames():
 
     try:
         sc = SparkContext()
@@ -123,21 +182,50 @@ if  __name__ == "__main__":
     except:
         print('Spark Context already exists')
     NumCores=MP.cpu_count();
+    yr=range(2009,2015)
+    weekRange=range(1,18)
+    gameRange=range(0,16)
+    GameID=np.zeros([len(yr)*len(weekRange)*len(gameRange),3])
+    GameID[:,0]=np.repeat(yr,272)
+    GameID[:,1]=np.tile(np.sort(np.tile(weekRange,16)),6)
+    GameID[:,2]=np.tile(gameRange,17*len(yr))
 
-    DRAll=list()
-    weekRange=range(1,17)
-
-    #DR=DriveResult(G1)
-    #count1=sc.parallelize(range(len(games)),NumCores)
-    #count2=count1.map(lambda x: DriveResult(games[x]))
-    #print('Collecting Results')
-    #R=count2.collect()
-
-    #DriveSQL=DriveAssign(Drive,sc)
-    #print(DriveSQL.count())
-    #DriveSQL2=DriveAssign(Drive2,sc)
-    #DriveSQL=DriveSQL.unionAll(DriveSQL2)
-    #print(DriveSQL.count())
+    count1=sc.parallelize(range(len(GameID)),NumCores)
+    count2=count1.map(lambda x: DriveResult(GameID[x,:]))
+    R=count2.collect()
+    count1=sc.parallelize(range(len(GameID)),NumCores)
+    count2=count1.map(lambda x: DriveResult(GameID[x,:]))
+    R=count2.collect()
+    FrameR=pd.DataFrame(columns=('Field Position','Result'))
+    for i in range(len(R)):
+        if len(np.shape(R[i]))==2:
+            FrameR=FrameR.append(R[i])
+    #ResFrame=DriveStartResult(FrameR)
     sc.stop()
 
-#A=SparkPandasTest(sc)
+    return FrameR
+
+if  __name__ == "__main__":
+
+    #try:
+    #    sc = SparkContext()
+    #    print('Making sc')
+    #except:
+    #    print('Spark Context already exists')
+    #NumCores=MP.cpu_count();
+
+
+    FrameR=pd.read_csv('DriveResults.csv')
+    E=DriveStartResult(FrameR)
+
+    #count1=sc.parallelize(range(len(GameID)),NumCores)
+    #count2=count1.map(lambda x: DriveResult(GameID[x,:]))
+    #R=count2.collect()
+
+    #FrameR=pd.DataFrame(columns=('Field Position','Result'))
+    #for i in range(len(R)):
+    #    if len(np.shape(R[i]))==2:
+    #        FrameR=FrameR.append(R[i])
+    #ResFrame=DriveStartResult(FrameR)
+    #sc.stop()
+

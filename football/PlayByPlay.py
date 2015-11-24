@@ -11,8 +11,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pyspark import SparkContext
 import pyspark as spark
+import time
 import multiprocessing as MP
 from pyspark.sql import SQLContext
+import matplotlib.lines as mlines
 
 
 def FieldPostoINT(FieldPosString):
@@ -157,7 +159,6 @@ def MapFilt(DFAll,DistDowns):
     #RateNum[1]=LenAll
     return RateNum
 
-
 def SaveSeasonPlays():
     weekRange=range(1,18)
     for y in range(2009,2016):
@@ -178,6 +179,35 @@ def MapFilt(DFAll,DistDowns):
     RateNum[1]=LenAll
     return RateNum
 
+def MakeDriveResultFrames():
+
+    try:
+        sc = SparkContext()
+        print('Making sc')
+    except:
+        print('Spark Context already exists')
+    NumCores=MP.cpu_count();
+    yr=range(2009,2015)
+    weekRange=range(1,18)
+    gameRange=range(0,16)
+    GameID=np.zeros([len(yr)*len(weekRange)*len(gameRange),3])
+    GameID[:,0]=np.repeat(yr,272)
+    GameID[:,1]=np.tile(np.sort(np.tile(weekRange,16)),6)
+    GameID[:,2]=np.tile(gameRange,17*len(yr))
+
+    count1=sc.parallelize(range(len(GameID)),NumCores)
+    count2=count1.map(lambda x: DriveResult(GameID[x,:]))
+    R=count2.collect()
+    FrameR=pd.DataFrame(columns=('Field Position','Result'))
+    for i in range(len(R)):
+        if len(np.shape(R[i]))==2:
+            FrameR=FrameR.append(R[i])
+    #ResFrame=DriveStartResult(FrameR)
+    sc.stop()
+    FrameR.to_csv('DriveResults.csv')
+
+    return FrameR
+
 def PlotSucces(DF):
     DF=DF[DF.Number>100]
     DownList=list()
@@ -195,7 +225,6 @@ def PlotSucces(DF):
             print(First10Prob)
             First10Prob=100*NP[int(First10Prob),1]
 
-    #print(NP)
     plt.xlim([0,25])
     plt.xlabel('Yards To Go (Minimum 100 Plays)')
     plt.ylabel('Probablity of 1st Down or TD (%)')
@@ -213,7 +242,97 @@ def PlotSucces(DF):
     plt.savefig('FirstProbs.pdf')
     return NP
 
+def DriveStartResultPlot(Frame):
+
+    YardGo=np.arange(0,11)*10
+    EndPoss=list(pd.unique(Frame.Result))
+    EndPoss.extend(['YardsToGo'])
+    #d=np.zeros(np.size(EndPoss))*np.nan
+    try:
+        EndPoss.remove(np.nan)
+    except:
+        print('no nan')
+    try:
+        EndPoss.remove('UNKNOWN')
+    except:
+        print('No Unknown')
+
+
+    ResFrame=pd.DataFrame(columns=EndPoss)
+    ResFrame.YardsToGo=YardGo[1:]
+
+    U=EndPoss[0:-1]
+
+    #print(ResFrame.columns)
+    for i in range(len(YardGo)-1):
+        F=Frame[(Frame['Field Position']>YardGo[i]) & (Frame['Field Position']<YardGo[i+1])]
+        #print(str(YardGo[i])  + 'Length' + str(len(F)))
+        for k in range(len(ResFrame.columns)-1):
+            ColN=U[k]
+            N=len(F[F.Result==ColN])/float(len(F))
+            try:
+                ResFrame.loc[i,ColN]=N
+            except:
+                print('Row: ' + str(i))
+                print('Col: ' + str(ColN) +str(k))
+
+    plt.subplot(2,1,1)
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Touchdown,marker='o',label='Touchdown')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Punt,marker='x',color='r',label='Punt')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame['Field Goal'],marker='s',color='g',label='Field Goal')
+    plt.legend(ncol=3)
+    plt.ylim([0,1])
+    plt.title('Probablity of Drive Result')
+
+    plt.subplot(2,1,2)
+    #plt.plot(ResFrame.YardsToGo-5,ResFrame.Interception,marker='o',label='Interception')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Interception+ResFrame.Fumble,marker='o',label='Fumble/INT')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame.Downs,marker='x',label='Downs',color='red')
+    plt.plot(ResFrame.YardsToGo-5,ResFrame['Missed FG']+ResFrame['Blocked FG'],marker='s',label='Missed FG',color='g')
+    plt.ylim([0,.23])
+    plt.legend(ncol=3)
+    plt.xlabel('Yards From End Zone')
+
+    plt.savefig('DriveResults.pdf')
+    plt.close('all')
+
+    return ResFrame
+
+def DriveResult(gameInfo):
+    games = nfl.games(year=int(gameInfo[0]),week=int(gameInfo[1]))
+    numGames=len(games)
+    if gameInfo[2]>=numGames:
+        return (np.nan,np.nan)
+    GameObj=games[int(gameInfo[2])]
+    NumDrives=len(GameObj.data['drives'])-1
+    OutList=[0]*(NumDrives-1)
+    #FieldPosStart=np.zeros(NumDrives-1)
+    for i in range(1,NumDrives):
+        D=GameObj.drives.number(i)
+        try:
+            FieldPosStart=50-D.field_start.offset
+            Result=D.result
+        except:
+            FieldPosStart=np.nan
+            Result=np.nan
+        OutList[i-1]=(FieldPosStart,Result)
+        print(str(OutList[i-1]) + 'Drive Number' + str(i))
+    #return OutList
+    return pd.DataFrame(OutList,columns=('Field Position', 'Result'))
+
+
 if __name__ == "__main__":
+
+    try:
+        M=pd.read_csv('DriveResults.csv')
+    except:
+        M=MakeDriveResultFrames()
+
+    DriveStartResultPlot(M)
+    try:
+        PDLoad=pd.read_csv('NFLPlays2010.csv')
+    except:
+        SaveSeasonPlays()
     try:
         sc = SparkContext()
         print('Making sc')
@@ -222,3 +341,5 @@ if __name__ == "__main__":
 
     A=SparkPandasTest(sc)
     NP=PlotSucces(A)
+
+
