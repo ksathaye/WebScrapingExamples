@@ -15,8 +15,89 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import datetime
 import matplotlib.pyplot as plt
+from sqlalchemy import create_engine
+import sqlite3 as db
 
-def saveAirQual(cityNum):
+
+def saveAirQualityIndia():
+    engine = create_engine('sqlite:///IndiaAir.db');
+
+    AirLinks=('http://newdelhi.usembassy.gov/airqualitydataemb/rawaqmreadings2015.csv','http://newdelhi.usembassy.gov/airqualitydataemb/aqm2013.csv','http://newdelhi.usembassy.gov/airqualitydataemb/aqm2014.csv')
+    FileNamesCSV=('IndiaAir2015.csv','IndiaAir2013.csv','IndiaAir2014.csv')
+
+    col=('Date','Time','DelhiPM','ChennaiPM','KolkataPM','MumbaiPM','HyderabadPM')
+    col2=('Date','Time','DelhiPM','DelhiPMAQI','ChennaiPM','ChennaiPMAQI','KolkataPM','KolkataPMAQI','MumbaiPM','MubmaiPMAQI','HyderabadPM','HyderabadPMAQI')
+    col3=('Date','Time','DelhiPM','DelhiPMAQI','ChennaiPM','ChennaiPMAQI','KolkataPM','KolkataPMAQI','MumbaiPM','MubmaiPMAQI','HyderabadPM','HyderabadPMAQI','Dummy')
+
+    colString=str(col)
+    colString=colString.replace("'",'')
+    colString=colString.replace(" ",'')
+
+    col2String=str(col2)
+    col2String=col2String.replace("'",'')
+    col2String=col2String.replace(" ",'')
+
+    col3String=str(col3)
+    col3String=col3String.replace("'",'')
+    col3String=col3String.replace(" ",'')
+
+
+    FirstSpace=0
+    FirstComma=0
+    dfList=list()
+    CurrentDate=datetime.datetime.now()
+    for i in range(len(AirLinks)):
+        FiltList=list()
+        if i==0:
+            FiltList.append(colString[1:-1]+'\n')
+        elif i==1:
+            FiltList.append(col3String[1:-1]+'\n')
+        elif i==2:
+            FiltList.append(col2String[1:-1]+'\n')
+
+        print(AirLinks[i])
+        r = (requests.get(AirLinks[i]).text).split('\n')
+        NumVal=np.zeros(len(r),dtype=int)
+        for k in range(len(r)):
+            try:
+                NumVal[k]=int(r[k][0])
+                FirstSpace=r[k].find(' ')
+                FirstComma=r[k].find(',')
+                #r[k]=r[k][0:]
+                #print(FirstSpace)
+                #print('First Comma: ' +str(FirstComma))
+                if FirstSpace<FirstComma:
+                    r[k]=r[k][0:FirstSpace]+','+r[k][FirstSpace:FirstComma]+r[k][FirstComma+1:]
+                FirstComma=r[k].find(',')
+                #r[k]=r[k][0:FirstComma] +' ' +r[k][FirstComma+1:]
+                FiltList.append(r[k])
+            except:
+                NumVal[k]=-999
+        f=open(FileNamesCSV[i], 'w')
+        f.writelines(FiltList)
+        f.close()
+        dfList.append(pd.read_csv(FileNamesCSV[i]))
+        TimeWrong=dfList[i].Time==' 24:00 AM'
+        dfList[i].loc[TimeWrong,'Time']='0:00 AM'
+        dfList[i].Date=pd.to_datetime(dfList[i].Date,dayfirst=True)
+
+        dfList[i].Time=pd.to_datetime(dfList[i].Time,dayfirst=True)-datetime.datetime(CurrentDate.year,CurrentDate.month,CurrentDate.day)
+        dfList[i]['Datetime']=dfList[i].Date+dfList[i].Time
+
+    dfAll=pd.concat(dfList,axis=0,join='inner')
+    dfAll=dfAll.drop('Date',axis=1)
+    dfAll=dfAll.drop('Time',axis=1)
+
+    for i in range(len(dfAll.columns)-1):
+        dfAll[dfAll.columns[i]]=np.genfromtxt(dfAll[dfAll.columns[i]])
+
+    dfAll.to_sql('IndiaAirAll',engine,if_exists='replace')
+    dfAll.to_csv('IndiaAirAll.csv')
+
+
+    return dfAll
+
+def saveAirQualChina(cityNum):
 
     cityList=('Beijing','Chengdu','Guangzhou','Shanghai','Shenyang')
 
@@ -61,7 +142,45 @@ def AddDateTime(listLinks,cityName):
         DFAll=DFAll.append(DF)
     DFAll.to_csv(cityName+str('.csv'))
 
-def MergeAllCities():
+def MergeAllIndia():
+    #FileNamesCSV=('IndiaAir2015.csv','IndiaAir2013.csv','IndiaAir2014.csv')
+
+    conn = db.connect('IndiaAir.db')
+    c=conn.cursor()
+    tableListQuery = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY Name"
+
+
+    W=c.execute(tableListQuery).fetchall()
+    strW=' '
+    conn.row_factory = db.Row
+    c = conn.cursor()
+    keyList=list()
+    for i in range(len(W)):
+        if i < len(W)-1:
+            strW= strW+ ' ' + str(W[i][0]) + ', '
+        else:
+            strW=strW+ ' ' + str(W[i][0])
+        c.execute("SELECT * FROM " + W[i][0] )
+        r=c.fetchone()
+        type(r)
+        keyList.append(r.keys())
+        if i>0:
+            sa= sa & set(keyList[i])
+        else:
+            sa=set(keyList[i])
+    sa=list(sa)
+    print(strW)
+    pdMerge=pd.DataFrame(columns=sa)
+    for i in range(1): # in range(len(sa)):
+        QueryColStatement="SELECT " + "Datetime" + " FROM " +   W[0][0]
+        print(QueryColStatement)
+        pdMerge['Datetime']=c.execute(QueryColStatement).fetchall()
+
+    conn.close()
+
+    return pdMerge
+
+def MergeAllChina():
     cityList=('Beijing','Chengdu','Guangzhou','Shanghai','Shenyang')
     columns=['Datetime','BeijingPM','ChengduPM','GuangzhouPM','ShanghaiPM','ShenyangPM']
     dfs=list(np.zeros(len(cityList)))
@@ -75,8 +194,8 @@ def MergeAllCities():
     dfOut.Datetime=pd.to_datetime(dfOut.Datetime)
     dfOut=dfOut.sort(columns='Datetime',axis=0,ascending=False)
     #PlotTimeSeries(dfOutpd.to_datetime)
+    dfOut.to_csv('ChinaAirAll.csv')
     return dfOut
-
 
 def PollCov(Frame):
     NumCities=len(D.columns)
@@ -134,7 +253,7 @@ def SignalSpectrum(Frame,cityNum):
     Y = scipy.fft(y)/n # fft computing and normalization
     Y = Y[range(n/2)]
     plt.subplot(2,1,1)
-    plt.plot(t,y)
+    plt.plot(Frame.Datetime,Frame.ShanghaiPM)
     plt.subplot(2,1,2)
     plt.plot(frq,abs(Y))
     plt.ylim([0,5])
@@ -154,7 +273,6 @@ def PlotTimeSeries(Frame):
         plt.fill_between([min(Frame.Datetime),max(Frame.Datetime)],[200,200],[250,250],color='#800000',alpha=0.5,zorder=2)
         plt.fill_between([min(Frame.Datetime),max(Frame.Datetime)],[200,200],[250,250],color='#800000',alpha=0.5,zorder=2)
 
-#D=MergeAllCities()
-#CM=PollCov(D)
-#F=SignalSpectrum(D,1)
-Y=SignalToy()
+D=MergeAllChina()
+#N=saveAirQualityIndia()
+#TableList=MergeAllIndia()
