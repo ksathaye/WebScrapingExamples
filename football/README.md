@@ -4,4 +4,4 @@ FirstProbs.pdf shows probability of drive continuation or touchdown based on dow
 
 DriveResults.pdf shows likelihood of drive results based on starting position on the field. 
 
-Running PlayByPlay.pdf main function generates these plots.
+Running PlayByPlay.py main function generates these plots.
