@@ -142,43 +142,6 @@ def AddDateTime(listLinks,cityName):
         DFAll=DFAll.append(DF)
     DFAll.to_csv(cityName+str('.csv'))
 
-def MergeAllIndia():
-    #FileNamesCSV=('IndiaAir2015.csv','IndiaAir2013.csv','IndiaAir2014.csv')
-
-    conn = db.connect('IndiaAir.db')
-    c=conn.cursor()
-    tableListQuery = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY Name"
-
-
-    W=c.execute(tableListQuery).fetchall()
-    strW=' '
-    conn.row_factory = db.Row
-    c = conn.cursor()
-    keyList=list()
-    for i in range(len(W)):
-        if i < len(W)-1:
-            strW= strW+ ' ' + str(W[i][0]) + ', '
-        else:
-            strW=strW+ ' ' + str(W[i][0])
-        c.execute("SELECT * FROM " + W[i][0] )
-        r=c.fetchone()
-        type(r)
-        keyList.append(r.keys())
-        if i>0:
-            sa= sa & set(keyList[i])
-        else:
-            sa=set(keyList[i])
-    sa=list(sa)
-    print(strW)
-    pdMerge=pd.DataFrame(columns=sa)
-    for i in range(1): # in range(len(sa)):
-        QueryColStatement="SELECT " + "Datetime" + " FROM " +   W[0][0]
-        print(QueryColStatement)
-        pdMerge['Datetime']=c.execute(QueryColStatement).fetchall()
-
-    conn.close()
-
-    return pdMerge
 
 def MergeAllChina():
     cityList=('Beijing','Chengdu','Guangzhou','Shanghai','Shenyang')
@@ -273,6 +236,30 @@ def PlotTimeSeries(Frame):
         plt.fill_between([min(Frame.Datetime),max(Frame.Datetime)],[200,200],[250,250],color='#800000',alpha=0.5,zorder=2)
         plt.fill_between([min(Frame.Datetime),max(Frame.Datetime)],[200,200],[250,250],color='#800000',alpha=0.5,zorder=2)
 
-D=MergeAllChina()
-#N=saveAirQualityIndia()
-#TableList=MergeAllIndia()
+
+if "__main__":
+    try:
+        india=pd.read_csv('IndiaAirAll.csv')
+    except:
+        india=saveAirQualityIndia()
+    try:
+        china=pd.read_csv('ChinaAirAll.csv')
+    except:
+        try:
+            china=MergeAllChina()
+        except:
+            saveAirQualChina()
+            china=MergeAllChina()
+    A=china.BeijingPM
+    A[A<0]=np.nan
+    N=np.isnan(A)
+    A=A[N==False]
+
+    plt.hist(np.array(A),100,cumulative=True,normed=True)
+    plt.plot([50,50],[0,1],c='red',lw=3)
+    plt.ylim([0,1])
+    plt.ylabel('Fraction of Hours')
+    plt.xlabel('PM 2.5 concentration')
+    plt.title('Beijing Air Quality 20085-2013')
+    plt.text(50,.2,'$\leftarrow$ US EPA Maximum', color='y', fontsize=14)
+    plt.savefig('BeijingCDF.pdf')
