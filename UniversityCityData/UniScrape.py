@@ -44,7 +44,7 @@ def getUniList():
     return L
 
 
-if '__main__':
+def GetDataFromWeb():
 
     try:
         LinkedinKeyLoc=os.path.expanduser('~')+'/Documents/'
@@ -95,3 +95,4 @@ if '__main__':
         rw = rw.encode('ascii', 'ignore').decode('ascii')
         P2=getCityNum(rw,name)
         P=pd.merge(P,P2,how='outer')
+    return P
