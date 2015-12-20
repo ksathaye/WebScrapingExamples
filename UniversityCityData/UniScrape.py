@@ -10,6 +10,34 @@ import numpy as np
 import requests
 from bs4 import BeautifulSoup
 import os
+from geopy.geocoders import GoogleV3 as G3
+
+def GeocodeUni():
+    GMapsKeyLoc=os.path.expanduser('~')+'/Documents/'
+    GMapsKey=open(GMapsKeyLoc+'GMapsKey.txt').read()
+    gl = G3()
+    gl.api_key=GMapsKey
+    #gl=Nominatim()
+    uniList=getUniList()
+    LongLatUni=np.zeros([len(uniList),2])
+    for i in range(len(LongLatUni)):
+        try:
+            Coords=gl.geocode(uniList.GEOID[i],exactly_one=True)
+            LongLatUni[i,0]=Coords.longitude
+            LongLatUni[i,1]=Coords.latitude
+            print(uniList.School[i]+' Found')
+            if Coords.longitude>0:
+                print('Wrong Location')
+
+        except:
+            LongLatUni[i,0]=np.nan
+            LongLatUni[i,1]=np.nan
+            print(uniList.School[i]+' Not Found')
+
+    uniList['Latitude']=LongLatUni[:,1]
+    uniList['Longitude']=LongLatUni[:,0]
+    uniList.to_csv('LinkedinCollegeID.csv')
+
 
 def getCityNum(t,name):
     rw=str(t).split('code":"us:')
@@ -41,7 +69,7 @@ def getCityNum(t,name):
 
 
 def getUniList():
-    L=pd.read_csv('LinkedinCollegeID.csv').sort(columns='USnewsrank')
+    L=pd.read_csv('LinkedinCollegeID2.csv').sort(columns='USnewsrank')
     return L
 
 
@@ -99,4 +127,5 @@ def GetDataFromWeb():
     return P
 
 if '__main__':
+    L=getUniList()
     GetDataFromWeb()
