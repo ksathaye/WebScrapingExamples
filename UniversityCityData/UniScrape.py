@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
+import os
 
 def getCityNum(t,name):
     rw=str(t).split('code":"us:')
@@ -48,7 +49,7 @@ def GetDataFromWeb():
 
     try:
         LinkedinKeyLoc=os.path.expanduser('~')+'/Documents/'
-        text_file=open(GMapsKeyLoc+"LIDpass.txt", "r")
+        text_file=open(LinkedinKeyLoc+"LIDpass.txt", "r")
         login=text_file.readline()[0:-1]
         pw=text_file.readline()[0:-1]
         text_file.close()
@@ -57,7 +58,6 @@ def GetDataFromWeb():
         pw=raw_input('Enter Linkedin Password: ')
 
     client = requests.Session()
-
     HOMEPAGE_URL = 'https://www.linkedin.com'
     LOGIN_URL = 'https://www.linkedin.com/uas/login-submit'
 
@@ -84,7 +84,7 @@ def GetDataFromWeb():
     #text_file.close()
     P=getCityNum(rw,name)
 
-    for i in range(1,2)#len(uniList)):
+    for i in range(1,len(uniList)):
 
         ID=uniList.ID[i]
         name=uniList.School[i]
@@ -95,4 +95,8 @@ def GetDataFromWeb():
         rw = rw.encode('ascii', 'ignore').decode('ascii')
         P2=getCityNum(rw,name)
         P=pd.merge(P,P2,how='outer')
+    P.to_csv('UniData.csv')
     return P
+
+if '__main__':
+    GetDataFromWeb()
