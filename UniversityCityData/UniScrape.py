@@ -10,8 +10,12 @@ import numpy as np
 import requests
 from bs4 import BeautifulSoup
 import os
-from geopy.geocoders import GoogleV3 as G3
+from geopy.distance import vincenty
 import matplotlib.pyplot as plt
+import sqlite3 as db
+from sqlalchemy import create_engine
+from mpl_toolkits.basemap import Basemap
+
 
 def GeocodeUni():
     GMapsKeyLoc=os.path.expanduser('~')+'/Documents/'
@@ -75,7 +79,6 @@ def getUniList():
 
 
 def GetDataFromWeb():
-
     try:
         LinkedinKeyLoc=os.path.expanduser('~')+'/Documents/'
         text_file=open(LinkedinKeyLoc+"LIDpass.txt", "r")
@@ -127,47 +130,6 @@ def GetDataFromWeb():
     P.to_csv('UniData.csv')
     return P
 
-
-def TopSFNYC(NumSchools,UniData):
-
-    SFpop=8.469854
-    NYpop=23.484225
-    SF=L[2:3]
-    SF=np.array(SF[SF.columns[3:NumSchools+3]])
-    NYC=L[1:2]
-    NYC=np.array(NYC[NYC.columns[3:NumSchools+3]])
-    A=L[0:1]
-    A=np.array(A[A.columns[3:NumSchools+3]])
-    ax = plt.gca()
-
-    NYC=NYC/A
-    SF=SF/A
-    b=np.zeros([np.size(NYC),2])
-    b[:,0]=NYC
-    b[:,1]=SF
-    NYplus=b[b[:,0]/b[:,1]>NYpop/SFpop,:]
-    SFplus=b[b[:,0]/b[:,1]<NYpop/SFpop,:]
-
-    ax.scatter(NYplus[:,0],NYplus[:,1],s=50)
-    ax.scatter(SFplus[:,0],SFplus[:,1],s=50,c='red')
-
-    ax.set_yscale('log')
-    ax.set_xscale('log')
-
-    p=plt.plot([0.01,NYpop],[0.01*SFpop/NYpop,SFpop],c='k',lw=2,label='Population\nProportion')
-    plt.xlim([.01,1])
-    plt.ylim([.01,1])
-    plt.text(.45,.015,'N=' +str(len(NYplus)),color='b',fontsize=16)
-    plt.text(.015,.5,'N=' +str(len(SFplus)),color='red',fontsize=16)
-    plt.legend(handles=p)
-
-    plt.xlabel('Fraction in New York City Area')
-    plt.ylabel('Fraction in SF Bay Area')
-    plt.title('University Alumni by City')
-    plt.savefig('SFNYCscatter.pdf')
-
-    return A
-
 def CityPair(L):
     L2=L[L.Population>0]
     col=L2.columns
@@ -215,10 +177,86 @@ def CityPair(L):
     plt.title('University Alumni by City')
 
 
-if '__main__':
+def USAMap(Long,Lat,Z,t):
+    Z[Z==0]=np.nan
+    m = Basemap(projection='merc',llcrnrlat=24,urcrnrlat=51,llcrnrlon=-125,urcrnrlon=-65,lat_ts=20,resolution='c')
+    m.drawcoastlines();
+    m.drawcountries(linewidth=2,zorder=3);
+    m.drawstates(zorder=3);
+    m.drawmapboundary(fill_color='aqua',zorder=1)
+    m.fillcontinents(color='w',lake_color='aqua')
+    LocationsCoord=m(Long,Lat)
+    Z2= plt.cm.jet(Z/max(Z))
+    cm = plt.cm.get_cmap('jet')
+
+    msc=m.scatter(LocationsCoord[0],LocationsCoord[1],s=400*Z/max(Z),zorder=3,c=Z2)
+    plt.title(t)
+    FakeX=np.linspace(20,50,100)
+    FakeY=np.linspace(-20,-50,100)
+
+    vmin = np.nanmin(Z)
+    vmax = np.nanmax(Z)
+    print(vmin)
+    FakeC=np.linspace(vmin,vmax,100)
+    f=plt.scatter(FakeX,FakeY,c=FakeC,cmap= plt.cm.jet)
+    plt.colorbar(orientation='horizontal')
+    plt.savefig(t+'.pdf',format='pdf')
+
+def MakeDB():
     try:
-        L=pd.read_csv('UniData.csv')
+        UniData=pd.read_csv('UniData.csv')
     except:
-        L=GetDataFromWeb()
-    #A=TopSFNYC(75,L)
-    CityPair(L)
+        UniData=GetDataFromWeb()
+    Citydata=pd.read_csv('cityList.csv')
+    Zipdata=pd.read_csv('zipCodes.csv')
+    Unilist=pd.read_csv('LinkedinCollegeID2.csv')
+    engine = create_engine('sqlite:///UniCity.db');
+
+    Citydata.to_sql('CityList', engine,if_exists='replace')
+    Unilist.to_sql('UniList', engine,if_exists='replace')
+    Zipdata.to_sql('ZipCodes', engine,if_exists='replace')
+    UniData.to_sql('UniData', engine,if_exists='replace')
+    print('Database Created')
+
+def MakeSchoolMap(numschools):
+    conn = db.connect('UniCity.db')
+    c=conn.cursor();
+    tableListQuery = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY Name"
+    Tables=c.execute(tableListQuery).fetchall()
+    print(Tables)
+
+    #cursor = c.execute('select  ZipCodes.Longitude, ZipCodes.Latitude, UniData.Penn, CityList.Population from CityList, ZipCodes, UniData WHERE  CityList.City=ZipCodes.City AND CityList.State=ZipCodes.State AND CityList.cityID=UniData.cityID AND UniData.Penn IS NOT NULL GROUP BY  CityList.City')
+    #LongLatPop = np.array(zip(*cursor.fetchall()))
+
+    cursor = c.execute('select cityID FROM CityList WHERE Population>1000000 ')
+
+    cityAll=cursor.fetchall()
+    GradSum=np.zeros([len(cityAll),4])
+
+    for i in range(len(cityAll)):
+        cityID=cityAll[i]
+        cIDStr=str(cityAll[i][0])
+        cursor = c.execute('SELECT Longitude, Latitude FROM ZIPCODES WHERE City= (select City FROM cityList WHERE CityID=? GROUP BY cityID) AND State= (select State FROM cityList WHERE CityID=? GROUP BY cityID) LIMIT 1',(cIDStr,cIDStr,))
+        L=cursor.fetchall()
+        GradSum[i,0:2]=L[0]
+
+        cursor = c.execute('select * FROM UniData WHERE CityID=? GROUP  BY cityID',cityID)
+        NYCD=cursor.fetchall()
+        GradSum[i,2]=sum(filter(None,NYCD[0][4:5+numschools]))
+        GradSum[i,3]=NYCD[0][3]
+
+    conn.close();
+
+    t='% of Residents from US News Top ' + str(numschools) + ' Universities'
+    USAMap(GradSum[:,0],GradSum[:,1],100*GradSum[:,2]/GradSum[:,3],t)
+    return GradSum
+
+
+if '__main__':
+    #try:
+    #    L=pd.read_csv('UniData.csv')
+    #except:
+    #    L=GetDataFromWeb()
+    #CityPair(L)
+    MakeDB()
+    GL=MakeSchoolMap(50)
