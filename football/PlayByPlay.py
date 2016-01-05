@@ -28,8 +28,8 @@ def FieldPostoINT(FieldPosString):
         FieldInt=np.nan
     return FieldInt
 
-def DriveAssign(Drive):
-    columnNames=('Down','ToGo','Success','Attempt','Team','DriveResult','DriveStart','DownGo','FieldPosition')
+def DriveAssign(Drive,DriveNum):
+    columnNames=('Down','ToGo','Success','Attempt','Team','DriveResult','DriveStart','DownGo','FieldPosition','GameKey','Opponent','DriveNum')
     if Drive==1:
         return pd.DataFrame(columns=columnNames)
 
@@ -69,6 +69,14 @@ def DriveAssign(Drive):
     df['Team']=Drive.team
     df['DownGo']=DownGo
     df['FieldPosition']=FieldPos
+    df['GameKey']=int(Drive.game.gamekey)
+    if Drive.home==False:
+        df['Opponent']=Drive.game.home
+    else:
+        df['Opponent']=Drive.game.away
+    df['DriveNum']=DriveNum
+
+
     df=df[df.Down>0]
     return df
 
@@ -108,11 +116,11 @@ def DownProbs(PlayData):
     plt.ylabel('% Chance of 1st Down or TD')
 
 def DrivesFromGame(gameObj):
-    D=DriveAssign(1)
+    D=DriveAssign(1,1)
     NumDrives=len(gameObj.data['drives'])-1
     for i in range(1,NumDrives):
         Drives=gameObj.drives.number(i)
-        D=D.append(DriveAssign(Drives))
+        D=D.append(DriveAssign(Drives,i))
     return D
 
 def SparkPandasTest(sc):
@@ -160,15 +168,44 @@ def MapFilt(DFAll,DistDowns):
     return RateNum
 
 def SaveSeasonPlays():
+    GameFrame=pd.DataFrame(columns=('GameKey','year','week','Home','Away','HomeScore','AwayScore'))
+    gamekey=list()
+    Away=list()
+    Home=list()
+    week=list()
+    year=list()
+    HS=list()
+    AS=list()
+
     weekRange=range(1,18)
     for y in range(2009,2016):
-        D=DriveAssign(1)
+        D=DriveAssign(1,1)
         games = nfl.games(year=y,week=weekRange)
         for i in range(len(games)):
             D=D.append(DrivesFromGame(games[i]))
+            print('game: ' +str(i))
+            gamekey.append(games[i].gamekey)
+            year.append(games[i].season())
+            week.append(games[i].schedule['week'])
+            Home.append(games[i].schedule['home'])
+            Away.append(games[i].schedule['away'])
+            HS.append(games[i].score_home)
+            AS.append(games[i].score_away)
+
+
         NameString='NFLPlays'+ str(y) + '.csv'
         D.to_csv(NameString)
         print('Year: '+str(y))
+
+    GameFrame['GameKey']=gamekey
+    GameFrame['year']=year
+    GameFrame['week']=week
+    GameFrame['Home']=Home
+    GameFrame['Away']=Away
+    GameFrame['HomeScore']=HS
+    GameFrame['AwayScore']=AS
+
+    GameFrame.to_csv('Gamekeys.csv')
 
 def MapFilt(DFAll,DistDowns):
     DownFilt=DFAll[DFAll.DownGo==DistDowns]
@@ -329,10 +366,10 @@ if __name__ == "__main__":
         M=MakeDriveResultFrames()
 
     DriveStartResultPlot(M)
-    try:
-        PDLoad=pd.read_csv('NFLPlays2010.csv')
-    except:
-        SaveSeasonPlays()
+    #try:
+    #    PDLoad=pd.read_csv('NFLPlays2010.csv')
+    #except:
+    SaveSeasonPlays()
     try:
         sc = SparkContext()
         print('Making sc')
@@ -341,5 +378,3 @@ if __name__ == "__main__":
 
     A=SparkPandasTest(sc)
     NP=PlotSucces(A)
-
-

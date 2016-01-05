@@ -8,224 +8,134 @@ Created on Mon Nov 16 16:32:19 2015
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pyspark import SparkContext
-import pyspark as spark
-import multiprocessing as MP
-from pyspark.sql import SQLContext
 import nflgame as nfl
 import time
 import matplotlib.lines as mlines
 import pyspark.sql.functions as SpFun
-
-def RandAR(s):
-
-    R=np.random.rand(s,4)
-    return R
+from sqlalchemy import create_engine
+import sqlite3 as db
+import pandas.io.sql as pdsql
 
 
-def SaveSeasonPlays():
-    weekRange=range(1,17)
-    for y in range(2009,2016):
-        D=DriveAssign(1)
-        games = nfl.games(year=y,week=weekRange)
-        for i in range(len(games)):
-            D=D.append(DrivesFromGame(games[i]))
-        NameString='NFLPlays'+ str(y) + '.csv'
-        D.to_csv(NameString)
-        print('Year: '+str(y))
+def TestDB():
+    conn = db.connect('NFLDB.db')
+    c=conn.cursor();
 
-def FieldPostoINT(FieldPosString):
-    if FieldPosString[0:3]=='OWN':
-       FieldInt=100-int(FieldPosString[-2:])
-    elif FieldPosString[0:3]=='OPP':
-       FieldInt=int(FieldPosString[-2:])
-    elif FieldPosString[0:3]=='MID':
-       FieldInt=50
-    else:
-        FieldInt=np.nan
-    return FieldInt
+    Query='SELECT * FROM  (SELECT  year, Home, count(Gamekey) hwin FROM Games WHERE Home IN (SELECT distinct Plays.Team FROM Plays)  AND  HomeScore>AwayScore AND year in (SELECT distinct year FROM Games) GROUP BY Home, year ORDER BY Home)  '
+    HomeWins=c.execute(Query).fetchall()
 
-def DrivesFromGame(gameObj):
-    D=DriveAssign(1)
-    NumDrives=len(gameObj.data['drives'])-1
-    for i in range(1,NumDrives):
-        Drives=gameObj.drives.number(i)
-        D=D.append(DriveAssign(Drives))
-    return D
+    Query='SELECT year, Away, count(Gamekey) FROM Games WHERE Away IN (SELECT distinct Plays.Team FROM Plays)  AND  HomeScore<AwayScore AND year in (SELECT distinct year FROM Games) GROUP BY Away, year'
+    AwayWins=c.execute(Query).fetchall()
 
-def DriveAssign(Drive,sc):
-    columnNames=('Down','ToGo','Success','Attempt','Team','DriveResult','DriveStart','DownGo','FieldPosition')
-    if Drive==1:
-        return pd.DataFrame(columns=columnNames)
+    Query='SELECT year, Team, count(P.Gain), avg(Gain)   FROM Plays P, Games G WHERE P.Team IN (SELECT distinct Plays.Team FROM Plays) AND year IN (SELECT distinct year FROM Games) AND P.Down=1 AND P.ToGo=10  AND P.Gamekey=G.Gamekey GROUP BY Team, year ORDER BY Team, year'
+    First10Total=c.execute(Query).fetchall()
 
-    NumPlays=Drive.play_cnt
-    n=0
-    playArray=np.zeros([NumPlays,5])
-    DownGo=list(range(NumPlays))
-    FieldPos=list(range(NumPlays))
-    for p in Drive.plays.sort(''):
-        playArray[n,0]=p.down
-        playArray[n,1]=p.yards_togo
-        FieldPos[n]=FieldPostoINT(str(p.yardline))
+    Query='SELECT year, Team, count(Gain) FROM Plays, Games WHERE Team IN (SELECT distinct Plays.Team FROM Plays) AND year IN (SELECT distinct year FROM Games) AND Plays.Down=1 AND Plays.ToGo=10 AND Gain>4 AND Plays.Gamekey=Games.Gamekey GROUP BY Opponent, year ORDER BY Team, year'
+    First10Success=c.execute(Query).fetchall()
 
-        DownGo[n]=str(p.down)+','+str(p.yards_togo)
-        n=n+1
-    #playArray[playArray[:,0]==0,0]=np.nan
-    try:
-        FirstDown=np.where(playArray[:,0]==1)
-        playArray[0:np.max(FirstDown),2]=1
-    except:
-        return pd.DataFrame(columns=columnNames)
+    Query='SELECT year, Opponent, count(Gain) FROM Plays, Games WHERE Opponent IN (SELECT distinct Plays.Opponent FROM Plays) AND year IN (SELECT distinct year FROM Games) AND Plays.Down=1 AND Plays.ToGo=10 AND Gain>4 AND Plays.Gamekey=Games.Gamekey GROUP BY Opponent, year ORDER BY Opponent, year'
+    First10SuccessOpp=c.execute(Query).fetchall()
 
-    if np.sum(playArray[:,0]==1)==1:
-       playArray[:,2]=0
+    Query='SELECT year, Opponent, count(P.Gain), avg(Gain) FROM Plays P, Games G WHERE P.Opponent IN (SELECT distinct Plays.Opponent FROM Plays) AND year IN (SELECT distinct year FROM Games) AND P.Down=1 AND P.ToGo=10  AND P.Gamekey=G.Gamekey GROUP BY Opponent, year ORDER BY Opponent, year'
+    First10TotalOpp=c.execute(Query).fetchall()
 
-    if Drive.result=='Touchdown':
-       playArray[:,2]=1
-    playArray[:,3]=1
+    Query='SELECT year, Team, count(Gain) FROM Plays P, Games G WHERE Down=3 AND Gain>=ToGo AND Team IN (SELECT distinct Team FROM Plays) AND year IN (SELECT distinct year FROM Games) AND P.Gamekey=G.Gamekey GROUP BY Team, year ORDER BY Team, year'
+    ThirdDownSuccess=c.execute(Query).fetchall()
 
-    df=pd.DataFrame(columns=columnNames)
-    df['Down']=np.array(playArray[:,0],dtype=int)
-    df['ToGo']=np.array(playArray[:,1],dtype=int)
-    df['Success']=np.array(playArray[:,2],dtype=int)
-    df['Attempt']=np.array(playArray[:,3],dtype=int)
-    df['DriveResult']=Drive.result
-    df['DriveStart']=Drive.field_start.offset
-    df['Team']=Drive.team
-    df['DownGo']=DownGo
-    df['FieldPosition']=FieldPos
-    df=df[df.Down>0]
-    sqlContext = SQLContext(sc)
-    print(df.count())
-    dfSP=sqlContext.createDataFrame(df)
+    Query='SELECT year, Team, count(Gain) FROM Plays P, Games G WHERE Down=3 AND Team IN (SELECT distinct Team FROM Plays) AND year IN (SELECT distinct year FROM Games) AND P.Gamekey=G.Gamekey GROUP BY Team, year ORDER BY Team, year'
+    ThirdDownAttempts=c.execute(Query).fetchall()
 
-    return dfSP
+    conn.close()
 
-def DriveResult(gameInfo):
-    games = nfl.games(year=int(gameInfo[0]),week=int(gameInfo[1]))
-    numGames=len(games)
-    if gameInfo[2]>=numGames:
-        return (np.nan,np.nan)
-    GameObj=games[int(gameInfo[2])]
-    NumDrives=len(GameObj.data['drives'])-1
-    OutList=[0]*(NumDrives-1)
-    #FieldPosStart=np.zeros(NumDrives-1)
-    for i in range(1,NumDrives):
-        D=GameObj.drives.number(i)
-        try:
-            FieldPosStart=50-D.field_start.offset
-            Result=D.result
-        except:
-            FieldPosStart=np.nan
-            Result=np.nan
-        OutList[i-1]=(FieldPosStart,Result)
-        print(str(OutList[i-1]) + 'Drive Number' + str(i))
-    #return OutList
-    return pd.DataFrame(OutList,columns=('Field Position', 'Result'))
+    P=pd.DataFrame(HomeWins, columns=('year','Team','HomeWins'))
+    PA=pd.DataFrame(AwayWins, columns=('year','Team','AwayWins'))
+    First10Total=pd.DataFrame(First10Total,columns=('year','Team','First10Plays','AveGainFirst10'))
+    First10Success=pd.DataFrame(First10Success,columns=('year','Team','First10Success'))
+    First10SuccessOpp=pd.DataFrame(First10SuccessOpp,columns=('year','Team','First10SuccessOpp'))
+    First10TotalOpp=pd.DataFrame(First10TotalOpp,columns=('year','Team','First10TotalOpp','AveGainOppFirst10'))
+    ThirdDownSuccess=pd.DataFrame(ThirdDownSuccess,columns=('year','Team','ThirdDownSuccesses'))
+    ThirdDownAttempts=pd.DataFrame(ThirdDownAttempts,columns=('year','Team','ThirdDownAttempts'))
 
-def DriveStartResult(Frame):
+    P=P.merge(PA,how='outer')
+    P=P.merge(First10Total,how='outer')
+    P=P.merge(First10Success,how='outer')
+    P=P.merge(First10SuccessOpp,how='outer')
+    P=P.merge(First10TotalOpp,how='outer')
+    P=P.merge(ThirdDownSuccess,how='outer')
+    P=P.merge(ThirdDownAttempts,how='outer')
 
-    YardGo=np.arange(0,11)*10
-    EndPoss=list(pd.unique(Frame.Result))
-    EndPoss.extend(['YardsToGo'])
-    #d=np.zeros(np.size(EndPoss))*np.nan
-    try:
-        EndPoss.remove(np.nan)
-    except:
-        print('no nan')
-    try:
-        EndPoss.remove('UNKNOWN')
-    except:
-        print('No Unknown')
+    FourthDowns=PuntDrives()
 
+    P=P.merge(FourthDowns,how='outer')
+    P.to_csv('TeamAggregateData.csv')
 
-    ResFrame=pd.DataFrame(columns=EndPoss)
-    ResFrame.YardsToGo=YardGo[1:]
+    return P
 
-    U=EndPoss[0:-1]
+def PuntDrives():
 
-    #print(ResFrame.columns)
-    for i in range(len(YardGo)-1):
-        F=Frame[(Frame['Field Position']>YardGo[i]) & (Frame['Field Position']<YardGo[i+1])]
-        #print(str(YardGo[i])  + 'Length' + str(len(F)))
-        for k in range(len(ResFrame.columns)-1):
-            ColN=U[k]
-            N=len(F[F.Result==ColN])/float(len(F))
-            try:
-                ResFrame.loc[i,ColN]=N
-            except:
-                print('Row: ' + str(i))
-                print('Col: ' + str(ColN) +str(k))
+    conn = db.connect('NFLDB.db')
+    c=conn.cursor();
 
-    plt.subplot(2,1,1)
-    plt.plot(ResFrame.YardsToGo-5,ResFrame.Touchdown,marker='o',label='Touchdown')
-    plt.plot(ResFrame.YardsToGo-5,ResFrame.Punt,marker='x',color='r',label='Punt')
-    plt.plot(ResFrame.YardsToGo-5,ResFrame['Field Goal'],marker='s',color='g',label='Field Goal')
-    plt.legend(ncol=3)
-    plt.ylim([0,1])
+    cursor = c.execute('select * from Plays')
+    rowt = c.description
+    colList=list()
+    for i in range(len(rowt)):
+        colList.append(rowt[i][0])
+    print(colList)
 
-    plt.subplot(2,1,2)
-    #plt.plot(ResFrame.YardsToGo-5,ResFrame.Interception,marker='o',label='Interception')
-    plt.plot(ResFrame.YardsToGo-5,ResFrame.Interception+ResFrame.Fumble,marker='o',label='Fumble/INT')
-    plt.plot(ResFrame.YardsToGo-5,ResFrame.Downs,marker='x',label='Downs',color='red')
-    plt.plot(ResFrame.YardsToGo-5,ResFrame['Missed FG']+ResFrame['Blocked FG'],marker='s',label='Missed FG',color='g')
-    plt.ylim([0,.23])
-    plt.legend(ncol=3)
+    GetDrivesQuery='SELECT distinct PL.GameKey, PL.DriveNum, PL.c, PL.DriveResult FROM (SELECT  GameKey, DriveNum, count(Down) c, DriveResult FROM Plays WHERE Down=4  GROUP BY GameKey, DriveNum) PL  WHERE  DriveResult != "Punt" AND DriveResult != "Field Goal" AND DriveResult != "Missed FG" AND DriveResult != "Blocked Punt" AND DriveResult != "End of Half"  AND DriveResult != "Blocked FG" AND DriveResult != "End of Game" OR c>1'
 
-    return ResFrame
+    GetPlaysQuery='SELECT  Plays.ToGo ToGo, Plays.Team Team , dq.Gamekey Gamekey, dq.DriveNum DriveNum, Plays.FieldPosition FieldPosition, Plays.DriveResult DriveResult, Plays.Gain Gain  FROM ' + '(' + GetDrivesQuery +' ) dq, Plays WHERE dq.DriveNum=Plays.DriveNum AND dq.GameKey=Plays.Gamekey AND Down=4'
 
-def MakeDriveResultFrames():
+    GetNonPunt='SELECT gpq.DriveResult,  gpq.Team Team, gpq.GameKey, gpq.FieldPosition FieldPosition, gpq.Gain Gain, gpq.DriveNum DriveNum, gpq.ToGo ToGo FROM ' + '(' + GetPlaysQuery + ') gpq WHERE DriveResult != "Punt" AND DriveResult != "Field Goal" AND DriveResult != "Missed FG" AND DriveResult != "Blocked Punt"  AND DriveResult != "Blocked FG" OR Gain>ToGo'
 
-    try:
-        sc = SparkContext()
-        print('Making sc')
-    except:
-        print('Spark Context already exists')
-    NumCores=MP.cpu_count();
-    yr=range(2009,2015)
-    weekRange=range(1,18)
-    gameRange=range(0,16)
-    GameID=np.zeros([len(yr)*len(weekRange)*len(gameRange),3])
-    GameID[:,0]=np.repeat(yr,272)
-    GameID[:,1]=np.tile(np.sort(np.tile(weekRange,16)),6)
-    GameID[:,2]=np.tile(gameRange,17*len(yr))
+    GetNonPunt2='SELECT gnp.Gamekey Gamekey, Team, Gain, DriveNum, ToGo, year, DriveResult FROM ( ' + GetNonPunt + ') gnp, Games WHERE GAMES.Gamekey=gnp.Gamekey'
 
-    count1=sc.parallelize(range(len(GameID)),NumCores)
-    count2=count1.map(lambda x: DriveResult(GameID[x,:]))
-    R=count2.collect()
-    count1=sc.parallelize(range(len(GameID)),NumCores)
-    count2=count1.map(lambda x: DriveResult(GameID[x,:]))
-    R=count2.collect()
-    FrameR=pd.DataFrame(columns=('Field Position','Result'))
-    for i in range(len(R)):
-        if len(np.shape(R[i]))==2:
-            FrameR=FrameR.append(R[i])
-    #ResFrame=DriveStartResult(FrameR)
-    sc.stop()
+    TotalSuccess='SELECT * FROM ((SELECT  count(Gamekey) Convers FROM (' + GetNonPunt2 + ') WHERE Gain>ToGo), (SELECT count(Gamekey) Attempt FROM (' +GetNonPunt2 + '))) '
 
-    return FrameR
+    GroupTeamYear='SELECT Team, year, FourthAttempt, FourthSuccess FROM ((SELECT Team, year, count(Gamekey) FourthAttempt FROM (' + GetNonPunt2 + ')  GROUP BY Team, year), (SELECT  Team Team2, year year2, count(Gamekey) FourthSuccess FROM (' + GetNonPunt2 + ') WHERE ToGo<=Gain GROUP BY Team, year)) WHERE Team2=Team AND year=year2'
 
-if  __name__ == "__main__":
+    S=c.execute(GroupTeamYear)
+    ColNames=S.description
+    colList=list()
+    for i in range(len(ColNames)):
+        colList.append(ColNames[i][0])
+    print(colList)
 
-    #try:
-    #    sc = SparkContext()
-    #    print('Making sc')
-    #except:
-    #    print('Spark Context already exists')
-    #NumCores=MP.cpu_count();
+    FourthDownAttempts=S.fetchall()
+    FourthDownAttempts=pd.DataFrame(FourthDownAttempts,columns=colList)
 
+    return FourthDownAttempts
 
-    FrameR=pd.read_csv('DriveResults.csv')
-    E=DriveStartResult(FrameR)
+def MakeDB():
 
-    #count1=sc.parallelize(range(len(GameID)),NumCores)
-    #count2=count1.map(lambda x: DriveResult(GameID[x,:]))
-    #R=count2.collect()
+    year=2009
+    FN='NFLPlays' +str(year)+'.csv'
+    P=pd.read_csv(FN)
+    for year in range(2010,2016):
+        FN='NFLPlays' +str(year)+'.csv'
+        P=P.append(pd.read_csv(FN))
+        #SeasonFiles=('NFLPlays')
+    P.drop('DownGo',inplace=True,axis=1)
+    P.drop('Attempt',inplace=True,axis=1)
+    P.drop('Unnamed: 0',inplace=True,axis=1)
+    P['Gain']=P.FieldPosition.diff(periods=-1)
+    P.loc[P.DriveNum.diff(periods=-1)!=0,'Gain']=np.nan
 
-    #FrameR=pd.DataFrame(columns=('Field Position','Result'))
-    #for i in range(len(R)):
-    #    if len(np.shape(R[i]))==2:
-    #        FrameR=FrameR.append(R[i])
-    #ResFrame=DriveStartResult(FrameR)
-    #sc.stop()
+    TF=(P.DriveResult=='Touchdown') & np.isnan(P.Gain)
+    P.Gain[TF==True]=P.FieldPosition[TF==True]
+    TF=(P.DriveResult != 'Touchdown') & np.isnan(P.Gain) & (P.DriveResult != 'Field Goal')
+    P.Gain[TF==True]=0
 
+    GK=pd.read_csv('Gamekeys.csv')
+    engine = create_engine('sqlite:///NFLDB.db')
+    GK.to_sql('Games', engine,if_exists='replace')
+    P.to_sql('Plays', engine,if_exists='replace')
+
+if '__main__':
+
+    t=time.time()
+    #S=FirstDownFiveYard()
+    HW=TestDB()
+    #D=PuntDrives()
+    print(str(time.time()-t) + ' seconds to query')

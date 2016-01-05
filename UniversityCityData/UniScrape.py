@@ -251,7 +251,6 @@ def MakeSchoolMap(numschools):
     USAMap(GradSum[:,0],GradSum[:,1],100*GradSum[:,2]/GradSum[:,3],t)
     return GradSum
 
-
 if '__main__':
     #try:
     #    L=pd.read_csv('UniData.csv')
@@ -259,4 +258,4 @@ if '__main__':
     #    L=GetDataFromWeb()
     #CityPair(L)
     MakeDB()
-    GL=MakeSchoolMap(50)
+    GL=MakeSchoolMap(20)
