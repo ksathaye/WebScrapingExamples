@@ -8,13 +8,17 @@ Created on Mon Nov 16 16:32:19 2015
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import nflgame as nfl
+#import nflgame as nfl
 import time
-import matplotlib.lines as mlines
-import pyspark.sql.functions as SpFun
+#import matplotlib.lines as mlines
+#import pyspark.sql.functions as SpFun
 from sqlalchemy import create_engine
 import sqlite3 as db
-import pandas.io.sql as pdsql
+#import pandas.io.sql as pdsql
+
+def Scatter3(A,B,C):
+    from mpl_toolkits.mplot3d import Axes3D
+
 
 
 def TestDB():
@@ -132,10 +136,15 @@ def MakeDB():
     GK.to_sql('Games', engine,if_exists='replace')
     P.to_sql('Plays', engine,if_exists='replace')
 
+def TeamYearCorr():
+    HW=TestDB()
+    HW['TotalWins']=HW.HomeWins+HW.AwayWins
+    return HW
+
 if '__main__':
 
     t=time.time()
     #S=FirstDownFiveYard()
-    HW=TestDB()
+    HW=TeamYearCorr()
     #D=PuntDrives()
     print(str(time.time()-t) + ' seconds to query')
