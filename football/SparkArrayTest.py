@@ -138,13 +138,28 @@ def MakeDB():
 
 def TeamYearCorr():
     HW=TestDB()
+    HW.HomeWins[np.isnan(HW.HomeWins)]=0
+    HW.AwayWins[np.isnan(HW.AwayWins)]=0
+    HW['FourthRate']=HW.FourthSuccess/HW.FourthAttempt
+    HW['ThirdRate']=HW.ThirdDownSuccesses/HW.ThirdDownAttempts
+    HW['FirstRate']=HW.First10Success/HW.First10Plays
     HW['TotalWins']=HW.HomeWins+HW.AwayWins
-    return HW
+
+    A=np.transpose(np.array(HW[HW.columns[4:]]))
+    CC=np.corrcoef(A)
+    Param=HW.columns[4:-1]
+    C = dict()
+
+    for i in range(len(Param)):
+        C[Param[i]]=CC[-1,i]
+
+
+    return C
 
 if '__main__':
 
     t=time.time()
     #S=FirstDownFiveYard()
-    HW=TeamYearCorr()
+    CC=TeamYearCorr()
     #D=PuntDrives()
     print(str(time.time()-t) + ' seconds to query')
