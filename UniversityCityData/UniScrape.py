@@ -130,7 +130,7 @@ def GetDataFromWeb():
     P.to_csv('UniData.csv')
     return P
 
-def CityPair(L):
+def CityPair(L,SaveOn):
     L2=L[L.Population>0]
     col=L2.columns
     L2.rename(columns={col[0]:'cityID'}, inplace=True)
@@ -175,6 +175,10 @@ def CityPair(L):
     plt.xlabel('Fraction in ' + c1Name)
     plt.ylabel('Fraction in ' + c2Name)
     plt.title('University Alumni by City')
+
+    if SaveOn==True:
+        FN=raw_input('Filename to Save:')
+        plt.savefig(FN)
 
 
 def USAMap(Long,Lat,Z,t):
@@ -252,10 +256,10 @@ def MakeSchoolMap(numschools):
     return GradSum
 
 if '__main__':
-    #try:
-    #    L=pd.read_csv('UniData.csv')
-    #except:
-    #    L=GetDataFromWeb()
-    #CityPair(L)
-    MakeDB()
-    GL=MakeSchoolMap(20)
+    try:
+        L=pd.read_csv('UniData.csv')
+    except:
+        L=GetDataFromWeb()
+    CityPair(L,True)
+    #MakeDB()
+    #GL=MakeSchoolMap(20)
