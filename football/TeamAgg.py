@@ -16,11 +16,6 @@ from sqlalchemy import create_engine
 import sqlite3 as db
 #import pandas.io.sql as pdsql
 
-def Scatter3(A,B,C):
-    from mpl_toolkits.mplot3d import Axes3D
-
-
-
 def TestDB():
     conn = db.connect('NFLDB.db')
     c=conn.cursor();
@@ -161,5 +156,5 @@ if '__main__':
     t=time.time()
     #S=FirstDownFiveYard()
     CC=TeamYearCorr()
-    #D=PuntDrives()
+    D=PuntDrives()
     print(str(time.time()-t) + ' seconds to query')
