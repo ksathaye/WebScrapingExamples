@@ -15,6 +15,9 @@ import matplotlib.pyplot as plt
 import sqlite3 as db
 from sqlalchemy import create_engine
 from mpl_toolkits.basemap import Basemap
+from sklearn.decomposition import PCA as PCA
+from sklearn import cluster
+
 
 
 def GeocodeUni():
@@ -72,11 +75,48 @@ def getCityNum(t,name):
     P[name]=pd.Series(countList)
     return P
 
-
 def getUniList():
     L=pd.read_csv('LinkedinCollegeID2.csv').sort(columns='USnewsrank')
     return L
 
+def ImputeSVD():
+
+    def get_error(Q, X, Y, W):
+        return np.sum((W * (Q - np.dot(X, Y)))**2)
+
+    OrigD=pd.read_csv('UniData.csv')
+    OrigD=OrigD[OrigD.city != 'Ithaca, New York']
+    OrigD=OrigD[OrigD.city != 'Madison, Wisconsin']
+
+    N=np.isnan(OrigD.Population)
+    OrigD=OrigD.loc[N==0]
+
+    ZeroD=np.log10(np.array(OrigD[OrigD.columns[2:]]))
+    ZeroD[np.isnan(ZeroD)]=0
+    W= ZeroD>0.5
+    lambda_ = 1
+    n_factors = 100
+    m, n = W.shape
+    n_iterations = 20
+    X = 5 * np.random.rand(m, n_factors)
+    Y = 5 * np.random.rand(n_factors, n)
+
+    weighted_errors = []
+    for ii in range(n_iterations):
+        for u, Wu in enumerate(W):
+            X[u] = np.linalg.solve(np.dot(Y, np.dot(np.diag(Wu), Y.T)) + lambda_ * np.eye(n_factors),np.dot(Y, np.dot(np.diag(Wu), ZeroD[u].T))).T
+        for i, Wi in enumerate(W.T):
+            Y[:,i] = np.linalg.solve(np.dot(X.T, np.dot(np.diag(Wi), X)) + lambda_ * np.eye(n_factors),np.dot(X.T, np.dot(np.diag(Wi), ZeroD[:, i])))
+        weighted_errors.append(get_error(ZeroD, X, Y, W))
+        print('{}th imputation iteration is completed'.format(ii))
+    interpPop = np.dot(X,Y)
+    interpPop[interpPop <0]=0
+
+    interpPopDB=pd.DataFrame(10**interpPop,columns=OrigD.columns[2:])
+    #interpPopDB.loc[0]=interpPop[0,:]
+    interpPopDB['city']=OrigD.city
+
+    return interpPopDB
 
 def GetDataFromWeb():
     try:
@@ -255,11 +295,81 @@ def MakeSchoolMap(numschools):
     USAMap(GradSum[:,0],GradSum[:,1],100*GradSum[:,2]/GradSum[:,3],t)
     return GradSum
 
+def GetCorrCoef():
+
+    OrigD=pd.read_csv('UniData.csv')
+    OrigD=OrigD[OrigD.city != 'Ithaca, New York']
+    OrigD=OrigD[OrigD.city != 'Madison, Wisconsin']
+
+    N=np.isnan(OrigD.Population)
+    PopD=OrigD.loc[N==0].Population
+    Cities=list(OrigD.loc[N==0].city)
+    CityFrame=pd.DataFrame(columns=('City','CityID'))
+    CityFrame.City=Cities
+    CityFrame.CityID=OrigD.loc[N==0].index
+
+    Imputed=ImputeSVD()
+    ImpData=np.array(Imputed[Imputed.columns[1:-1]])/PopD[:,np.newaxis]
+
+    ImpFrame=pd.DataFrame(ImpData,columns=Imputed.columns[1:-1])
+    ImpFrame['city']=Cities
+
+    CC=np.corrcoef(np.transpose(ImpData))
+    CCDB=pd.DataFrame(CC,columns=Imputed.columns[1:-1])
+
+    return CCDB, ImpData, CityFrame
+
+def UniPCA():
+    D, ImpData, CityFrame=GetCorrCoef()
+    conn = db.connect('UniCity.db')
+    c=conn.cursor();
+    LatLong=np.zeros([len(CityFrame.index[1:]),2])
+    counter=0
+    for i in CityFrame.index[1:]:
+        cIDStr=str(CityFrame.loc[i].CityID)
+        cursor = c.execute('SELECT Longitude, Latitude FROM ZIPCODES WHERE City= (select City FROM cityList WHERE CityID=? GROUP BY cityID) AND State= (select State FROM cityList WHERE CityID=? GROUP BY cityID) LIMIT 1',(cIDStr,cIDStr,))
+        LatLong[counter,0:2]=cursor.fetchall()[0]
+        counter=counter+1
+
+    sklearn_pca = PCA(n_components=20)
+    sklearn_transf = 1e3*sklearn_pca.fit_transform(ImpData[1:])
+
+    k_means = cluster.KMeans(4)
+    KC=k_means.fit_predict(sklearn_transf).astype(float)
+    ClusterFrame=pd.DataFrame(columns=('City','Cluster'))
+    ClusterFrame.City=CityFrame.City[1:]
+    ClusterFrame['Cluster']=KC
+
+    print(np.shape(KC))
+    #plt.scatter(sklearn_transf[0:,0],sklearn_transf[0:,1],c=KC,s=100)
+    #plt.grid()
+    print(np.shape(LatLong))
+    #plt.scatter(LatLong[:,0],LatLong[:,1],c=KC,s=100)
+    Long=LatLong[:,0]
+    Lat=LatLong[:,1]
+    conn.close()
+    m = Basemap(projection='merc',llcrnrlat=24,urcrnrlat=51,llcrnrlon=-125,urcrnrlon=-65,lat_ts=20,resolution='c')
+    m.drawcoastlines();
+    m.drawcountries(linewidth=2,zorder=3);
+    m.drawstates(zorder=3);
+    m.drawmapboundary(fill_color='aqua',zorder=1)
+    m.fillcontinents(color='w',lake_color='aqua')
+    LocationsCoord=m(Long,Lat)
+    Z2= plt.cm.jet(KC/max(KC))
+    print(Z2)
+    cm = plt.cm.get_cmap('jet')
+
+    m.scatter(LocationsCoord[0],LocationsCoord[1],s=200,c=Z2,zorder=2)
+    plt.title('US Cities K-Means Cluster of University PCA')
+    plt.savefig('CityPCA.pdf')
+
+    return LatLong
+
 if '__main__':
     try:
         L=pd.read_csv('UniData.csv')
     except:
         L=GetDataFromWeb()
-    CityPair(L,True)
-    #MakeDB()
-    #GL=MakeSchoolMap(20)
+    MakeSchoolMap(50)
+    plt.figure()
+    LL=UniPCA()
