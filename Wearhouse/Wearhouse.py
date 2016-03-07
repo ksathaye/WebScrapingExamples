@@ -125,5 +125,29 @@ def LobsterScrapeUSA():
 
     return LatLong
 
+def LatLongFill():
+    WearHouseLL=pd.read_csv('Wearhouse.csv')
 
-LL=LobsterScrapeUSA()
+    ZipCodes=pd.read_csv('USPostalCodes.csv')
+    ZC=ZipCodes[['Postal Code','Latitude','Longitude']]
+    ZDict=ZC.set_index('Postal Code').T.to_dict('list')
+
+    NanVals=WearHouseLL[np.isnan(WearHouseLL.Latitude)==True]
+    NanVals=NanVals[NanVals['Postal Code']>1]
+
+    WearHouseLL=WearHouseLL[np.isnan(WearHouseLL.Latitude)==False]
+    LatLong=np.zeros([len(NanVals),2])
+    c=0
+    for i in NanVals.index:
+        Lat=ZDict[NanVals.loc[i]['Postal Code']]
+        LatLong[c,:]=Lat
+        c=c+1
+    NanVals.Latitude=LatLong[:,0]
+    NanVals.Longitude=LatLong[:,1]
+    WearHouseLL=pd.concat([WearHouseLL,NanVals])
+
+    return WearHouseLL
+
+NV=LatLongFill()
+#LL=LobsterScrapeUSA()
+
