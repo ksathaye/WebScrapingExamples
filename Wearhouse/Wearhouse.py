@@ -11,6 +11,8 @@ import requests as rq
 import numpy as np
 import pandas as pd
 import re
+import matplotlib.pyplot as plt
+from mpl_toolkits.basemap import Basemap
 
 def ifNext(F):
 
@@ -125,6 +127,24 @@ def LobsterScrapeUSA():
 
     return LatLong
 
+def PlotRL(LatLong,res):
+    m = Basemap(projection='merc',llcrnrlat=24,urcrnrlat=51,llcrnrlon=-125,urcrnrlon=-65,lat_ts=20,resolution=res)
+    m.drawcoastlines();
+    m.drawcountries(linewidth=2,zorder=3);
+    m.drawstates(zorder=3);
+    LocationsCoord=m(np.array(LatLong['Longitude']),np.array(LatLong['Latitude']));
+    m.drawmapboundary(fill_color='aqua',zorder=1)
+    m.fillcontinents(color='w',lake_color='aqua')
+    m.scatter(LocationsCoord[0],LocationsCoord[1],s=25,edgecolor='k',c='red',zorder=3);
+    plt.title('Men' + "'" + 's Wearhouse Locations')
+    meridians = np.arange(10.,351.,10.)
+    parallels = np.arange(0.,81,5.)
+    m.drawparallels(parallels,labels=[False,True,True,False])
+    m.drawmeridians(meridians,labels=[True,False,False,True])
+    #shp_info = m.readshapefile('st99_d00','states',drawbounds=True)
+    plt.savefig('WearPlot.pdf')
+
+
 def LatLongFill():
     WearHouseLL=pd.read_csv('Wearhouse.csv')
 
@@ -149,6 +169,9 @@ def LatLongFill():
 
     return WearHouseLL
 
-NV=LatLongFill()
+
+WearHouseLL=pd.read_csv('Wearhouse.csv')
+PlotRL(WearHouseLL,'i')
+#NV=LatLongFill()
 #LL=LobsterScrapeUSA()
 
