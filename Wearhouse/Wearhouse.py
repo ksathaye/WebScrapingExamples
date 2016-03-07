@@ -145,6 +145,7 @@ def LatLongFill():
     NanVals.Latitude=LatLong[:,0]
     NanVals.Longitude=LatLong[:,1]
     WearHouseLL=pd.concat([WearHouseLL,NanVals])
+    WearHouseLL.to_csv('Wearhouse.csv')
 
     return WearHouseLL
 
