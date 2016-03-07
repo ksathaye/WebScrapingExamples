@@ -36,7 +36,6 @@ def GreatCircle(Point1,PointsIn):
     arc = np.arccos(cos)*3959.871227;
     return arc # returns great circle distance between points in miles
 
-
 def CircleVec(Point1,RLFrame):
 
     RLLatLong=np.array(RLFrame[['Longitude','Latitude']])
