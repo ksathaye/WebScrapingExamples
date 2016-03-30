@@ -30,7 +30,7 @@ def CallDistanceSpark(Logins,W):
     count2=count1.map(lambda x: CircleVec(Logins[x,:],W))
     Dist=count2.collect()
     SparkTime=time.time()-t;
-    print(['Great Circle Spark Time: ' + str(int(SparkTime*1e3)) +' ms'])
+    print(['Great Circle Spark Time: ' + str(int(SparkTime*1e3)) +' milliseconds with ' + str(NumCores) +' CPUs'])
 
     sc.stop()
 
@@ -91,9 +91,7 @@ def BasePlot(W,Logins,res):
     LoginsCoord=m(np.array(Logins['Longitude']),np.array(Logins['Latitude']));
     m.scatter(LoginsCoord[0],LoginsCoord[1],s=25,edgecolor='k',c='r',zorder=2);
 
-    #WLand=m.is_land(LoginsCoord[0],LoginsCoord[1])
     return WLand
-    #shp_info = m.readshapefile('st99_d00','states',drawbounds=True)
     #plt.savefig('WearPlot.pdf')
 
 def MakeSynthetic(N):
@@ -119,4 +117,7 @@ def LoadWearhouse(PD):
         return WTuple
     return W2
 
-WLand=MakeSynthetic(1000000)
+if "__main__":
+    N=int(1e5)
+    WLand=MakeSynthetic(N)
+    Wearhouses=LoadWearhouse(1)
