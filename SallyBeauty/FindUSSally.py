@@ -170,8 +170,8 @@ def LatLongFill():
     return WearHouseLL
 
 
-#WearHouseLL=pd.read_csv('Wearhouse.csv')
-#PlotRL(WearHouseLL,'i')
-NV=LatLongFill()
+WearHouseLL=pd.read_csv('Wearhouse.csv')
+PlotRL(WearHouseLL,'i')
+#NV=LatLongFill()
 #LL=LobsterScrapeUSA()
 
